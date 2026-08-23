@@ -279,10 +279,22 @@ export interface AppliedOffer {
 	give_item?: string;
 }
 
+/**
+ * One row of Sales Invoice.posa_coupons, which is a POS Coupon Detail table.
+ *
+ * The keys are the child doctype's fieldnames because this object is sent straight
+ * into the invoice. `coupon`, `pos_offer` and `coupon_code` are all mandatory there,
+ * and `coupon` is the POS Coupon *document name* — not the code the cashier typed.
+ * The server increments the used-count by that name, and the once-per-customer rule
+ * counts these rows by `customer`, so an incomplete row breaks both.
+ */
 export interface Coupon {
+	/** POS Coupon docname. Mandatory server-side. */
+	coupon?: string;
 	coupon_code: string;
 	pos_offer?: string;
-	coupon_type?: string;
+	/** Mirrors POS Coupon.coupon_type — "Promotional" or "Gift Card". */
+	type?: string;
 	customer?: string;
 	applied?: 0 | 1;
 }

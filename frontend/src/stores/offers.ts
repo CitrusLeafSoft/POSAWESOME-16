@@ -170,7 +170,16 @@ export const useOffersStore = defineStore("offers", () => {
 				coupon: typed,
 				customer: cart.customer,
 				company: session.companyName,
-			})) as { msg?: string; coupon?: { coupon_code?: string; pos_offer?: string } } | null;
+			})) as {
+				msg?: string;
+				coupon?: {
+					name?: string;
+					coupon_code?: string;
+					coupon_type?: string;
+					pos_offer?: string;
+					customer?: string;
+				};
+			} | null;
 
 			const applied = result?.coupon;
 			if (!applied) {
@@ -180,12 +189,23 @@ export const useOffersStore = defineStore("offers", () => {
 
 			// The server matches case-insensitively; store what it actually resolved to so
 			// removing the coupon later compares against the same string.
-			const resolvedCode = applied.coupon_code ?? code;
+			const resolvedCode = applied.coupon_code ?? typed;
 			const offerName = applied.pos_offer;
 
+			// A full POS Coupon Detail row. Sending only the code and the offer left
+			// `coupon` empty, and the invoice refused to save at all — "Value missing
+			// for: Coupon". It is also what the server increments the used-count by, and
+			// `customer` is what the once-per-customer rule counts on.
 			coupons.value = [
 				...coupons.value,
-				{ coupon_code: resolvedCode, pos_offer: offerName, applied: 1 },
+				{
+					coupon: applied.name,
+					coupon_code: resolvedCode,
+					pos_offer: offerName,
+					type: applied.coupon_type,
+					customer: applied.customer || cart.customer || undefined,
+					applied: 1,
+				},
 			];
 			cart.appliedCoupons = coupons.value;
 			// A coupon can unlock a coupon-gated offer, so switch it on immediately.
