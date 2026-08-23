@@ -41,15 +41,35 @@ const frame = ref<HTMLIFrameElement | null>(null);
 const canPrint = computed(() => ready.value && !!html.value && !rendering.value);
 
 /**
- * Give the iframe a base URL so the format's own stylesheet and images load.
- * Without this the receipt is unstyled text — on screen and on paper.
+ * Prepare Frappe's print page for use as an embedded preview.
+ *
+ * Two injections, both into <head>:
+ *
+ * A <base>, because a srcdoc iframe resolves relative URLs against about:srcdoc — so
+ * the format's own stylesheet, Frappe's print bundle and any images all load from
+ * nothing and the receipt renders as unstyled text.
+ *
+ * A stylesheet that drops the "action-banner": Frappe's print page carries its own
+ * Print and Get PDF links, which belong to that page, not to the document. They are
+ * marked print-hide so paper is unaffected, but on screen they sit above the receipt
+ * looking like part of it — and this dialog already has its own Print button.
  */
-function withBase(source: string): string {
+const PREVIEW_CSS = `
+<style>
+	/* Frappe's own print-page chrome. Not part of the document being previewed. */
+	.action-banner { display: none !important; }
+	/* The gutter exists to mimic paper margins around an A4 page; on a receipt it
+	   just wastes the width of the dialog. */
+	.print-format-gutter { padding: 0 !important; background: transparent !important; }
+</style>`;
+
+function prepareForPreview(source: string): string {
 	if (!source) return source;
-	const base = `<base href="${window.location.origin}/">`;
-	if (/<base\s/i.test(source)) return source;
-	if (/<head[^>]*>/i.test(source)) return source.replace(/<head([^>]*)>/i, `<head$1>${base}`);
-	return base + source;
+	const head = `<base href="${window.location.origin}/">${PREVIEW_CSS}`;
+	if (/<head[^>]*>/i.test(source)) {
+		return source.replace(/<head([^>]*)>/i, `<head$1>${head}`);
+	}
+	return head + source;
 }
 
 async function loadOptions() {
@@ -75,7 +95,7 @@ async function loadPreview() {
 			printFormat.value || undefined,
 			letterhead.value || null,
 		);
-		html.value = withBase(result.html);
+		html.value = prepareForPreview(result.html);
 		// The server tells us what it actually used; reflect it so the selector is not
 		// showing one format while another is on screen.
 		if (result.print_format && !printFormat.value) printFormat.value = result.print_format;
