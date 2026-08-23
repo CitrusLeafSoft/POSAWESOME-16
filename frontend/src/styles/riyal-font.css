@@ -1,0 +1,20 @@
+/*
+ * The Saudi Riyal sign (U+20C1) as a one-glyph font — generated, do not edit.
+ *
+ * Regenerate with frontend/scripts/riyal/build_glyph.py. The artwork is SAMA's
+ * own file (frontend/scripts/riyal/official.svg).
+ *
+ * This family carries exactly one codepoint, so it is listed FIRST in the sans
+ * stack: the browser resolves U+20C1 here and falls through to Inter for every
+ * other character. Inlining it as a data URI keeps it working offline and stops
+ * Vite's emptyOutDir from deleting it.
+ */
+
+@font-face {
+	font-family: "Saudi Riyal Sign";
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: block;
+	src: url("data:font/woff2;base64,d09GMgABAAAAAAKEAAoAAAAABTwAAAI5AAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmAANAqBLIErATYCJAMGCwYABCAFhREHLht9BCCOxHR7gyxXUuZN/pN/vefOvA94PuDAWtBl2AHuXMV1arGSquX55b1f0VAHTp1P9j/XvMjnJ1DfDoCqPBIkl1wJcnhEe8N6fgKzAe6NZ5uNY9O+Vzl1QVDEqKhfAN4S7UMKCTmGnV4AYqXBRXIMVjrwFHQF7jAABxTjyPRcIgASCYHYZBJ9r2aANuVLxvwoYB40PwYAdroVdOBI+frDx6vWLF0SgZ+514aonK2JcIEh+8+Xzab9+4nWY/1fjfil5v9Didul/4ffRmTw/fYVl5vid0rut9Vu2cG+LMlTG3f8GLnWlLhY8rBN+azLe+15z32zficab+qGYh3PfzcAAAQguP7l7sD2vCm/0zn/DMC75/UAgI83Ms9gFNhj7wEcAwAE+82eAGa0A0GbnAxU5ZlRrB9gKEeuayDpPDCB5JsHTJp1wNXbui+FQYoc4depSu0ER5MBYBdOAohINzC5WQrcrGzelwApKnP0Tqqu3Jxv9Fm1QmZ3/ojOlFgtcyl1w2fKEN5M2+qZS2e2P4NHhKt0Pmgf1LjQqtwPp79tS/WoVal+N0a7rRaHzKM67PQr76C/p49rJHw85jPysdISZOycPCzsDCYIq8m4KOkIs6mYOdnJGAmzyJgZCG1Wm2mpmdp1ESzU1HQUdLrYVbmKjs/1fQ4+JnIWRj2B/11NR8NsFRUNFyMZe4Kpph7rRrublYXD5D1UHLyJyrrQzpHGWkaFfj36Ztvr/kJ2CrlBleYy6wb6ZvcDAAA=") format("woff2");
+	unicode-range: U+20C1;
+}
