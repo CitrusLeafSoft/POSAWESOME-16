@@ -67,9 +67,21 @@ def _sync_one(uuid, entry):
 	validate_shift_access(invoice_data.get("posa_pos_opening_shift"))
 
 	invoice_data["posa_offline_uuid"] = uuid
-	# Offline invoices always create a fresh document; a client-side name would
-	# collide with whatever the site has already issued.
-	invoice_data.pop("name", None)
+
+	# A client-generated name would collide with whatever the site has already issued,
+	# so it is dropped — *unless* it names a draft this site really did create. That
+	# happens when the connection died between saving the draft and submitting it:
+	# reusing it settles the sale the cashier actually took, instead of leaving an
+	# orphaned draft behind next to a duplicate.
+	claimed = invoice_data.pop("name", None)
+	if claimed:
+		existing_draft = frappe.db.get_value(
+			"Sales Invoice",
+			{"name": claimed, "docstatus": 0, "posa_pos_opening_shift": invoice_data.get("posa_pos_opening_shift")},
+			"name",
+		)
+		if existing_draft:
+			invoice_data["name"] = existing_draft
 
 	draft = update_invoice(invoice_data)
 	result = submit_invoice({"name": draft.name}, submit_data)

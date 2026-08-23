@@ -89,6 +89,21 @@ export const useSyncStore = defineStore("sync", () => {
 		return false;
 	}
 
+	/**
+	 * Flatten reactive state into plain data.
+	 *
+	 * IndexedDB stores by structured clone, and a Vue reactive Proxy is not cloneable
+	 * — `DataCloneError: could not be cloned`. `toInvoicePayload()` passes some arrays
+	 * (posa_offers, posa_coupons) straight out of the store, and even an *empty*
+	 * reactive array is still a Proxy, so every queued sale failed on the write. The
+	 * payload is pure JSON data by construction, so a round trip through JSON is both
+	 * sufficient and exact — and it drops the `undefined`s a wire payload should not
+	 * carry anyway.
+	 */
+	function plain<T>(value: T): T {
+		return JSON.parse(JSON.stringify(value ?? null)) as T;
+	}
+
 	/** Park a completed-but-unsent sale. Returns the queue id. */
 	async function enqueue(payload: {
 		invoice: Record<string, unknown>;
@@ -104,13 +119,11 @@ export const useSyncStore = defineStore("sync", () => {
 			updated_at: now,
 			status: "pending",
 			attempts: 0,
-			summary: payload.summary,
-			// The draft name is deliberately dropped: the server issues its own when
-			// the entry is replayed, and a stale local name would collide.
-			payload: {
-				invoice: { ...payload.invoice, name: undefined },
+			summary: plain(payload.summary),
+			payload: plain({
+				invoice: payload.invoice,
 				data: payload.data,
-			},
+			}),
 		};
 		await enqueueInvoice(entry);
 		await refresh();
@@ -164,8 +177,10 @@ export const useSyncStore = defineStore("sync", () => {
 					return all;
 				}
 
+				const answered = new Set<string>();
 				for (const result of results ?? []) {
 					if (!result?.uuid) continue;
+					answered.add(result.uuid);
 					const row = slice.find((entry) => entry.uuid === result.uuid);
 					if (result.status === "synced" || result.status === "duplicate") {
 						// Accepted, so it can go. `duplicate` means a previous attempt got
@@ -179,6 +194,17 @@ export const useSyncStore = defineStore("sync", () => {
 						});
 					}
 					all.push(result);
+				}
+
+				// An entry the server did not mention is still unsent, and would otherwise
+				// sit at "syncing" forever — counted as neither pending nor failed, so the
+				// operator would see an empty queue while a sale had never landed.
+				for (const row of slice) {
+					if (answered.has(row.uuid)) continue;
+					await updateQueueEntry(row.uuid, {
+						status: "pending",
+						last_error: "The server did not report on this entry; it will be retried.",
+					});
 				}
 			}
 		} finally {

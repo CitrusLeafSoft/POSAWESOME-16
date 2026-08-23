@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Keyboard, LogOut, ShoppingBag, Store } from "lucide-vue-next";
+import { CloudOff, Keyboard, LogOut, ShoppingBag, Store } from "lucide-vue-next";
 import { useSessionStore } from "@/stores/session";
 import { useUiStore } from "@/stores/ui";
 import { useCartStore } from "@/stores/cart";
+import { useSyncStore } from "@/stores/sync";
 import ConnectionPill from "./ConnectionPill.vue";
 import ThemeButton from "./ThemeButton.vue";
 
 const session = useSessionStore();
 const ui = useUiStore();
 const cart = useCartStore();
+const sync = useSyncStore();
 
 const initials = computed(() =>
 	(session.fullName || session.user || "?")
@@ -49,6 +51,26 @@ const initials = computed(() =>
 			>
 				Return
 			</span>
+
+			<!-- Offline invoices. Present whenever the profile allows offline selling, not
+			     only once something is stuck, so a cashier can check the queue is empty. -->
+			<button
+				v-if="session.offlineEnabled"
+				type="button"
+				class="relative grid size-9 place-items-center rounded-card transition"
+				:class="sync.hasOutstanding ? 'text-warning hover:bg-warning-soft' : 'text-muted hover:bg-surface-2 hover:text-fg'"
+				:title="sync.hasOutstanding ? `${sync.outstanding} offline invoice(s) waiting to send` : 'Offline invoices'"
+				aria-label="Offline invoices"
+				@click="ui.openModal('queue')"
+			>
+				<CloudOff class="size-4.5" />
+				<span
+					v-if="sync.hasOutstanding"
+					class="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-warning px-1 text-[10px] font-bold text-inverse"
+					:class="sync.draining && 'animate-pulse'"
+					>{{ sync.outstanding }}</span
+				>
+			</button>
 
 			<ConnectionPill />
 

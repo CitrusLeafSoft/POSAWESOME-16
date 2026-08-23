@@ -48,6 +48,16 @@ async function hold() {
 			cart.reset();
 		}
 	} catch (error) {
+		// Holding parks a *draft* on the server, which needs a name only the server can
+		// issue — so unlike completing a sale it cannot be queued. Say that plainly
+		// instead of surfacing a bare "Offline".
+		if (!session.serverReachable) {
+			ui.warn(
+				"Cannot hold while offline",
+				"Holding needs the server. Complete the sale instead — it will be kept on this terminal and sent when the connection returns.",
+			);
+			return;
+		}
 		ui.fail("Could not hold the invoice", error instanceof Error ? error.message : String(error));
 	} finally {
 		holding.value = false;

@@ -75,13 +75,34 @@ class PosDatabase extends Dexie {
 
 export const db = new PosDatabase();
 
+/** Raised when the queue cannot be written. Never swallowed — see enqueueInvoice. */
+export class StorageUnavailableError extends Error {
+	constructor(cause?: unknown) {
+		super("This terminal's offline storage is not available");
+		this.name = "StorageUnavailableError";
+		this.cause = cause;
+	}
+}
+
 /** Dexie throws in private-browsing / disabled-storage contexts; degrade quietly. */
 let storageUsable: boolean | null = null;
+
+/**
+ * Opening can also *hang* rather than fail — a blocked upgrade, or a browser that
+ * neither grants nor refuses the request. Without a ceiling every caller awaits
+ * forever, which looks exactly like a frozen till.
+ */
+const OPEN_TIMEOUT_MS = 4000;
 
 export async function isStorageUsable(): Promise<boolean> {
 	if (storageUsable !== null) return storageUsable;
 	try {
-		await db.open();
+		await Promise.race([
+			db.open(),
+			new Promise((_, reject) =>
+				setTimeout(() => reject(new Error("IndexedDB open timed out")), OPEN_TIMEOUT_MS),
+			),
+		]);
 		storageUsable = true;
 	} catch {
 		storageUsable = false;
@@ -166,8 +187,21 @@ export async function cacheStamp(kind: "items" | "customers", profile: string): 
 /* Outbox                                                                      */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Store one completed-but-unsent sale.
+ *
+ * The only write in this file that must not fail quietly. Everything else here is a
+ * cache — losing it costs a round trip. Losing this loses a sale whose money is
+ * already in the drawer, so failure is raised rather than swallowed and the caller
+ * is expected to tell the cashier.
+ */
 export async function enqueueInvoice(entry: QueuedInvoice): Promise<void> {
-	await guard(() => db.queue.put(entry), undefined);
+	if (!(await isStorageUsable())) throw new StorageUnavailableError();
+	try {
+		await db.queue.put(entry);
+	} catch (error) {
+		throw new StorageUnavailableError(error);
+	}
 }
 
 export async function listQueue(profile?: string): Promise<QueuedInvoice[]> {

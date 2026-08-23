@@ -9,6 +9,9 @@
  * Boot is bypassed on purpose — the point is the sell screen, not the shift dialog.
  * Development entry only; not in the production build.
  */
+// chrome-headless-shell has no IndexedDB, so the offline queue cannot be exercised
+// without one. Installed before anything imports lib/db.ts, which opens Dexie on load.
+import "fake-indexeddb/auto";
 import { createApp, h } from "vue";
 import { createPinia } from "pinia";
 import SellView from "./views/SellView.vue";
@@ -21,6 +24,8 @@ import { useCatalogStore } from "./stores/catalog";
 import { useOffersStore } from "./stores/offers";
 import { usePaymentsStore } from "./stores/payments";
 import { useSessionStore } from "./stores/session";
+import { useUiStore } from "./stores/ui";
+import { useSyncStore } from "./stores/sync";
 import type { Item } from "./types";
 import "./styles/main.css";
 
@@ -57,13 +62,33 @@ const ROUTES: [string, unknown][] = [
 	["catalog.get_item_detail", { income_account: "Sales", cost_center: "Main" }],
 	["invoice_api.update_invoice", { name: "SINV-PROBE-1", items: [], taxes: [] }],
 ];
-window.fetch = (async (input: RequestInfo | URL) => {
+let networkUp = true;
+let syncCalls = 0;
+let storageOk: boolean | null = null;
+const probeNotes: string[] = [];
+window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 	const url = String(typeof input === "string" ? input : (input as Request).url ?? input);
+	if (!networkUp) throw new TypeError("Failed to fetch");
+
+	// Answer the sync endpoint the way the server does: one result per uuid sent.
+	if (url.includes("offline.sync_invoices")) {
+		syncCalls += 1;
+		const sent = JSON.parse(String(init?.body ?? "{}")).batch as { uuid: string }[];
+		const results = (sent ?? []).map((entry, i) => ({
+			uuid: entry.uuid, status: "synced", name: `SINV-SYNCED-${i + 1}`, docstatus: 1,
+		}));
+		return new Response(JSON.stringify({ message: results }), {
+			status: 200, headers: { "Content-Type": "application/json" },
+		});
+	}
 	const hit = ROUTES.find(([k]) => url.includes(k));
 	return new Response(JSON.stringify({ message: hit ? hit[1] : [] }), {
 		status: 200, headers: { "Content-Type": "application/json" },
 	});
 }) as typeof fetch;
+
+// navigator.onLine is read before every call; make it follow the stub.
+Object.defineProperty(navigator, "onLine", { get: () => networkUp, configurable: true });
 
 const app = createApp({
 	setup: () => () => h("div", { class: "h-dvh bg-bg text-fg" }, [h(SellView), h(ToastHost)]),
@@ -85,7 +110,7 @@ session.profile = {
 	payments: [{ mode_of_payment: "Cash", default: 1, type: "Cash" }],
 	posa_allow_user_to_edit_additional_discount: 1,
 	posa_allow_user_to_edit_rate: 1, posa_allow_user_to_edit_item_discount: 1,
-	use_customer_credit: 1, posa_allow_return: 1,
+	use_customer_credit: 1, posa_allow_return: 1, posa_allow_offline_mode: 1,
 } as never;
 session.company = { company_name: "Probe Co" } as never;
 session.ready = true;
@@ -103,6 +128,8 @@ catalog.loadGroups = async () => {};
 catalog.items = [ITEM];
 
 const cart = useCartStore();
+cart.customer = "Walk-in";
+cart.customerInfo = { name: "Walk-in", customer_name: "Walk-in" } as never;
 const offers = useOffersStore();
 const payments = usePaymentsStore();
 
@@ -128,6 +155,9 @@ function report(stage: string) {
 		`grand total     : ${cart.totals.grandTotal}`,
 		`coupons applied : ${offers.coupons.length}`,
 		`RECURSIVE LOOP  : ${recursive.length ? recursive.map(([k, n]) => `${n}x ${k}`).join(" | ") : "none"}`,
+		`storage usable  : ${storageOk}`,
+		`isolation       : ${probeNotes.join(" | ") || "-"}`,
+		`toasts          : ${useUiStore().toasts.map((t) => `[${t.tone}] ${t.title}`).join(" | ") || "none"}`,
 		`messages        : ${[...seen.entries()].map(([k, n]) => `${n}x ${k}`).join("\n                  ") || "none"}`,
 	].join("\n");
 	document.body.append(el);
@@ -154,4 +184,72 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 	payments.tenderExact();
 	await tick();
 	report("tendered");
+
+	/* ---- offline path -------------------------------------------------- */
+	try {
+	const dbmod = await import("./lib/db");
+	storageOk = await dbmod.isStorageUsable();
+
+	// Isolate: does a trivial entry store, and does a payload straight off the cart?
+	try {
+		await dbmod.enqueueInvoice({
+			uuid: "probe-trivial", profile: "P", shift: "S",
+			created_at: Date.now(), updated_at: Date.now(), status: "pending", attempts: 0,
+			summary: { customer: "c", customer_name: "c", grand_total: 1, currency: "SAR", item_count: 1 },
+			payload: { invoice: { a: 1 }, data: {} },
+		});
+		probeNotes.push("trivial entry: stored");
+	} catch (e) {
+		probeNotes.push(`trivial entry FAILED: ${e instanceof Error ? `${e.name}: ${(e as Error & {cause?:unknown}).cause ?? e.message}` : String(e)}`);
+	}
+	try {
+		await dbmod.enqueueInvoice({
+			uuid: "probe-cart", profile: "P", shift: "S",
+			created_at: Date.now(), updated_at: Date.now(), status: "pending", attempts: 0,
+			summary: { customer: "c", customer_name: "c", grand_total: 1, currency: "SAR", item_count: 1 },
+			payload: { invoice: cart.toInvoicePayload(), data: {} },
+		});
+		probeNotes.push("raw cart payload stored (unexpected — plain() may be unnecessary now)");
+	} catch (e) {
+		probeNotes.push("raw cart payload unclonable, as expected — this is why sync.enqueue calls plain()");
+	}
+	const sync = useSyncStore();
+	await sync.refresh();
+
+	networkUp = false;
+	session.serverReachable = false;
+	session.online = false;
+
+	const queued = await payments.submit();
+	await tick();
+	await sync.refresh();
+	reportOffline("submitted while offline", queued, sync);
+
+	networkUp = true;
+	session.online = true;
+	const drained = await sync.drain();
+	await tick();
+	await sync.refresh();
+	reportOffline(`drained (${drained.length} result(s), ${syncCalls} sync call(s))`, queued, sync);
+	} catch (e) {
+		const el = document.createElement("pre");
+		el.textContent = `OFFLINE BLOCK THREW: ${e instanceof Error ? e.stack ?? e.message : String(e)}`;
+		document.body.append(el);
+	}
 })();
+
+function reportOffline(stage: string, queued: unknown, sync: ReturnType<typeof useSyncStore>) {
+	const el = document.createElement("pre");
+	el.textContent = [
+		`STAGE           : ${stage}`,
+		`queued marker   : ${JSON.stringify(queued)}`,
+		`canSubmit       : ${usePaymentsStore().canSubmit}  paid=${usePaymentsStore().paid} payable=${usePaymentsStore().payable} settled=${usePaymentsStore().settled}`,
+		`queue entries   : ${sync.entries.length}  pending=${sync.pending.length} failed=${sync.failed.length}`,
+		`outstanding     : ${sync.outstanding}`,
+		`storage usable  : ${storageOk}`,
+		`isolation       : ${probeNotes.join(" | ") || "-"}`,
+		`toasts          : ${useUiStore().toasts.map((t) => `[${t.tone}] ${t.title}`).join(" | ") || "none"}`,
+		`messages        : ${[...seen.entries()].map(([k, n]) => `${n}x ${k}`).join("\n                  ") || "none"}`,
+	].join("\n");
+	document.body.append(el);
+}

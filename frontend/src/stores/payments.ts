@@ -185,84 +185,135 @@ export const usePaymentsStore = defineStore("payments", () => {
 		for (const row of rows.value) row.amount = 0;
 	}
 
+	/** Offline-capable, and the thing that failed was the network rather than a rule. */
+	function canQueue(error: unknown): boolean {
+		return session.offlineEnabled && sync.isConnectivityFailure(error);
+	}
+
+	/** Everything `submit_invoice` would have received, built from local state. */
+	function buildPayload(draftName?: string) {
+		const invoice = {
+			...cart.toInvoicePayload(),
+			name: draftName,
+			payments: rows.value
+				// Magnitude, not sign: refund rows are negative and a `> 0` test
+				// silently drops every one of them, leaving the invoice unpaid.
+				.filter((row) => Math.abs(row.amount) > 0)
+				.map((row) => ({
+					mode_of_payment: row.mode_of_payment,
+					amount: row.amount,
+					account: row.account,
+					type: row.type,
+					default: row.default ? 1 : 0,
+				})),
+			paid_amount: paid.value,
+			change_amount: change.value,
+		};
+
+		const data: Record<string, unknown> = {
+			due_date: cart.dueDate ?? undefined,
+			redeemed_customer_credit: creditApplied.value || undefined,
+			customer_credit_dict: creditApplied.value
+				? credit.value.filter((row) => toNumber(row.credit_to_redeem) > 0)
+				: undefined,
+			credit_change: change.value || undefined,
+		};
+
+		return { invoice, data };
+	}
+
+	/**
+	 * Park a completed sale on the terminal.
+	 *
+	 * The money is in the drawer and the goods have gone, so this must not fail
+	 * quietly — if even the local write fails there is nothing left holding the sale
+	 * and the cashier has to be told.
+	 */
+	async function queueSale(invoice: Record<string, unknown>, data: Record<string, unknown>) {
+		try {
+			return await parkSale(invoice, data);
+		} catch (error) {
+			// Nothing is holding this sale now — not the server, not the terminal. The
+			// cashier has to know before the customer walks away.
+			ui.notify({
+				title: "This sale was NOT saved",
+				detail:
+					"No connection, and this terminal cannot store it either. Do not hand over the goods — write the sale down and re-enter it once the connection is back.",
+				tone: "danger",
+				duration: 0,
+			});
+			throw error;
+		}
+	}
+
+	async function parkSale(invoice: Record<string, unknown>, data: Record<string, unknown>) {
+		const uuid = await sync.enqueue({
+			invoice,
+			data,
+			summary: {
+				customer: cart.customer,
+				customer_name: cart.customerInfo?.customer_name ?? cart.customer,
+				grand_total: payable.value,
+				currency: session.currency,
+				item_count: cart.itemCount,
+			},
+		});
+		lastInvoice.value = { name: uuid, __queued: true };
+		ui.warn(
+			"Held on this terminal",
+			"No connection. It sends itself as soon as the network is back — take the money and hand over the goods.",
+		);
+		return lastInvoice.value;
+	}
+
 	async function submit(): Promise<Record<string, unknown> | null> {
 		if (!canSubmit.value) return null;
 		submitting.value = true;
 		try {
-			// The server is the authority on totals, so always save before tendering.
-			const draft = await cart.saveDraft();
-			if (!draft?.name) {
-				ui.fail("Could not save the invoice");
-				return null;
+			// Settle the totals on the server when there is one: saving can move them
+			// (first-time taxes, discount resolution), and tendering against a figure the
+			// server is about to change is how "Pay" ends up rejecting a good sale.
+			//
+			// Offline there is nothing to settle against, so the local figures stand —
+			// they come from the same arithmetic, and the server re-checks everything when
+			// the queue drains.
+			let draftName: string | undefined;
+			try {
+				const draft = await cart.saveDraft();
+				draftName = draft?.name as string | undefined;
+				if (!draftName) {
+					ui.fail("Could not save the invoice");
+					return null;
+				}
+				if (!touched.value) {
+					clear();
+					tenderExact();
+				}
+			} catch (error) {
+				// This is where an offline sale used to die: the draft save threw before
+				// anything had a chance to queue, and the cashier saw a bare "Offline".
+				if (!canQueue(error)) throw error;
+				const parked = buildPayload();
+				return await queueSale(parked.invoice, parked.data);
 			}
 
-			// Saving can move the total (first-time taxes, discount resolution).
-			// While the cashier has not hand-tuned amounts, follow the server so
-			// paid_amount lands exactly on grand_total — otherwise submission is
-			// rejected for being short or over.
-			if (!touched.value) {
-				clear();
-				tenderExact();
-			}
-
-			const invoice = {
-				...cart.toInvoicePayload(),
-				name: draft.name,
-				payments: rows.value
-					// Magnitude, not sign: refund rows are negative and a `> 0` test
-					// silently drops every one of them, leaving the invoice unpaid.
-					.filter((row) => Math.abs(row.amount) > 0)
-					.map((row) => ({
-						mode_of_payment: row.mode_of_payment,
-						amount: row.amount,
-						account: row.account,
-						type: row.type,
-						default: row.default ? 1 : 0,
-					})),
-				paid_amount: paid.value,
-				change_amount: change.value,
-			};
-
-			const submitData: Record<string, unknown> = {
-				due_date: cart.dueDate ?? undefined,
-				redeemed_customer_credit: creditApplied.value || undefined,
-				customer_credit_dict: creditApplied.value ? credit.value.filter((row) => toNumber(row.credit_to_redeem) > 0) : undefined,
-				credit_change: change.value || undefined,
-			};
+			const { invoice, data } = buildPayload(draftName);
 
 			let result: Record<string, unknown>;
 			try {
-				result = (await api.submitInvoice(invoice, submitData)) as Record<string, unknown>;
+				result = (await api.submitInvoice(invoice, data)) as Record<string, unknown>;
 			} catch (error) {
-				// The money is already in the drawer and the goods are with the
-				// customer. If the only thing that failed was the network, the sale is
-				// parked and replayed; anything the server actually answered is a real
-				// refusal and has to reach the cashier.
-				if (!session.offlineEnabled || !sync.isConnectivityFailure(error)) throw error;
-
-				const uuid = await sync.enqueue({
-					invoice,
-					data: submitData,
-					summary: {
-						customer: cart.customer,
-						customer_name: cart.customerInfo?.customer_name ?? cart.customer,
-						grand_total: payable.value,
-						currency: session.currency,
-						item_count: cart.itemCount,
-					},
-				});
-				lastInvoice.value = { name: uuid, __queued: true };
-				ui.warn(
-					"Saved on this terminal",
-					"No connection. The sale sends itself as soon as the network is back.",
-				);
-				return lastInvoice.value;
+				// Anything the server actually answered — negative stock, a permission
+				// refusal — is a real decision and has to reach the cashier. Only a
+				// transport failure is replayable.
+				if (!canQueue(error)) throw error;
+				return await queueSale(invoice, data);
 			}
 
 			lastInvoice.value = result;
 			ui.success(
 				cart.isReturn ? "Refund complete" : "Sale complete",
-				`${result.name ?? draft.name}${change.value ? ` · change ${change.value}` : ""}`,
+				`${result.name ?? draftName}${change.value ? ` · change ${change.value}` : ""}`,
 			);
 			return result;
 		} catch (error) {
