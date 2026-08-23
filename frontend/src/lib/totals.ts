@@ -174,7 +174,9 @@ export function calculateTotals(input: TotalsInput): Totals {
 	// ---- grand total -------------------------------------------------------
 	let grandTotal = money(netTotal + totalTaxes);
 
-	if (!discountOnNet && discountAmount) {
+	if (!discountOnNet && (discountAmount || discountPercentage)) {
+		// Discount on Grand Total: the base only exists once taxes are in, so a
+		// percentage is resolved here — even when no explicit amount was typed.
 		if (discountPercentage) discountAmount = money((grandTotal * discountPercentage) / 100);
 		grandTotal = money(grandTotal - discountAmount);
 	}

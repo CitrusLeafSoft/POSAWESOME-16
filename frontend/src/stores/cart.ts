@@ -360,7 +360,21 @@ export const useCartStore = defineStore("cart", () => {
 	function setSerialBatch(rowId: string, payload: { batch_no?: string | null; serial_no?: string | null }) {
 		const line = items.value.find((item) => item.posa_row_id === rowId);
 		if (!line) return;
-		if (payload.batch_no !== undefined) line.batch_no = payload.batch_no;
+		if (payload.batch_no !== undefined) {
+			line.batch_no = payload.batch_no;
+			// A batch-priced item re-prices when its batch is picked, matching the
+			// price override applied when the batch arrived from a scan.
+			if (payload.batch_no) {
+				const batch = line.batch_no_data?.find((entry) => entry.batch_no === payload.batch_no);
+				if (batch?.batch_price) {
+					line.price_list_rate = money(batch.batch_price);
+					line.rate = line.price_list_rate;
+					line.discount_percentage = 0;
+					line.discount_amount = 0;
+					line.amount = lineAmount(line);
+				}
+			}
+		}
 		if (payload.serial_no !== undefined) {
 			line.serial_no = payload.serial_no;
 			// Serialised items are sold one unit per number.
@@ -406,6 +420,23 @@ export const useCartStore = defineStore("cart", () => {
 		markDirty();
 	}
 
+	/** The currency value a redemption is worth at the customer's conversion factor. */
+	const maxLoyaltyAmount = computed(() => {
+		const factor = toNumber(customerInfo.value?.conversion_factor);
+		if (!factor) return 0;
+		return money(toNumber(customerInfo.value?.loyalty_points) * factor);
+	});
+
+	function setLoyaltyRedemption(amount: number) {
+		const value = money(Math.min(Math.max(toNumber(amount), 0), maxLoyaltyAmount.value));
+		const factor = toNumber(customerInfo.value?.conversion_factor);
+		loyaltyAmount.value = value;
+		loyaltyPointsRedeemed.value = factor ? Math.floor(value / factor) : 0;
+		if (toNumber(amount) > maxLoyaltyAmount.value)
+			ui.warn("Loyalty amount capped", `Cannot redeem more than ${maxLoyaltyAmount.value}.`);
+		markDirty();
+	}
+
 	/* ---------------------------------------------------------- persistence */
 
 	/** The payload `update_invoice` expects. */
@@ -439,8 +470,10 @@ export const useCartStore = defineStore("cart", () => {
 			shipping_address_name: shippingAddress.value ?? undefined,
 			posa_delivery_charges: deliveryCharges.value ?? undefined,
 			posa_delivery_charges_rate: deliveryChargesRate.value || undefined,
+			loyalty_program: customerInfo.value?.loyalty_program ?? undefined,
 			loyalty_points: loyaltyPointsRedeemed.value || 0,
 			loyalty_amount: loyaltyAmount.value || 0,
+			redeem_loyalty_points: loyaltyPointsRedeemed.value > 0 ? 1 : 0,
 			posa_offers: appliedOffers.value,
 			posa_coupons: appliedCoupons.value,
 			sales_team: salesPerson.value
@@ -684,6 +717,8 @@ export const useCartStore = defineStore("cart", () => {
 		setNotes,
 		removeItem,
 		setAdditionalDiscount,
+		maxLoyaltyAmount,
+		setLoyaltyRedemption,
 		saveDraft,
 		toInvoicePayload,
 		adoptServerDoc,

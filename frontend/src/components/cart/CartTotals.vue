@@ -10,6 +10,17 @@ const session = useSessionStore();
 const t = computed(() => cart.totals);
 const canDiscount = computed(() => !!session.profile?.posa_allow_user_to_edit_additional_discount);
 const usePercentage = computed(() => !!session.profile?.posa_use_percentage_discount);
+
+/** A trailing % always means percentage; otherwise the profile's preference decides. */
+function commit(event: Event) {
+	const raw = (event.target as HTMLInputElement).value.trim();
+	if (!raw) {
+		cart.setAdditionalDiscount(0, "percentage");
+		return;
+	}
+	if (raw.endsWith("%")) cart.setAdditionalDiscount(toNumber(raw.slice(0, -1)), "percentage");
+	else cart.setAdditionalDiscount(toNumber(raw), usePercentage.value ? "percentage" : "amount");
+}
 </script>
 
 <template>
@@ -26,21 +37,21 @@ const usePercentage = computed(() => !!session.profile?.posa_use_percentage_disc
 
 		<div class="flex items-center justify-between gap-2 text-muted">
 			<label :for="'addl-disc'" class="shrink-0">
-				Discount<span v-if="usePercentage" class="text-subtle"> %</span>
+				Discount<span class="text-subtle"> (10 or 10%)</span>
 			</label>
 			<input
 				id="addl-disc"
-				:value="usePercentage ? formatFloat(cart.additionalDiscountPercentage, 2) : formatFloat(cart.additionalDiscount, 2)"
+				:value="
+					usePercentage
+						? formatFloat(cart.additionalDiscountPercentage, 2)
+						: formatFloat(cart.additionalDiscount, 2)
+				"
 				type="text"
 				inputmode="decimal"
+				placeholder="0"
 				:disabled="!canDiscount"
 				class="h-8 w-24 rounded-card border-line bg-surface text-right text-sm tnum shadow-xs focus:border-accent focus:ring-0 disabled:bg-surface-2 disabled:text-subtle"
-				@change="
-					cart.setAdditionalDiscount(
-						toNumber(($event.target as HTMLInputElement).value),
-						usePercentage ? 'percentage' : 'amount',
-					)
-				"
+				@change="commit($event)"
 			/>
 		</div>
 

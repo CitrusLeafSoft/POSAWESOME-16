@@ -4,15 +4,18 @@ import { onMounted, ref } from "vue";
 import { LayoutGrid, List, Loader2, PackageOpen, RotateCw, Search, X } from "lucide-vue-next";
 import { useCatalogStore } from "@/stores/catalog";
 import { useCartStore } from "@/stores/cart";
+import { useSessionStore } from "@/stores/session";
 import { useUiStore } from "@/stores/ui";
 import { registerHotkeys } from "@/lib/hotkeys";
 import { relativeTime } from "@/lib/format";
+import { decodeScaleBarcode } from "@/lib/scanner";
 import type { Item } from "@/types";
 import ItemCard from "./ItemCard.vue";
 import ItemRow from "./ItemRow.vue";
 
 const catalog = useCatalogStore();
 const cart = useCartStore();
+const session = useSessionStore();
 const ui = useUiStore();
 
 const searchEl = ref<HTMLInputElement | null>(null);
@@ -40,21 +43,25 @@ async function onSubmitSearch() {
 	const term = catalog.search.trim();
 	if (!term) return;
 
-	const resolved = await catalog.resolveScan(term);
+	// Scale tickets carry the weight in the tail; resolve the item from the head.
+	const scale = decodeScaleBarcode(term, session.profile?.posa_scale_barcode_start);
+	const lookup = scale?.lookup ?? term;
+
+	const resolved = await catalog.resolveScan(lookup);
 	if (resolved) {
-		await cart.addItem(resolved);
+		await cart.addItem(resolved, scale ? { qty: scale.weight } : {});
 		catalog.setSearch("");
 		return;
 	}
 
 	// Exactly one match is unambiguous — treat Enter as "add it".
-	if (catalog.filtered.length === 1) {
+	if (!scale && catalog.filtered.length === 1) {
 		await cart.addItem(catalog.filtered[0]);
 		catalog.setSearch("");
 		return;
 	}
 
-	if (!catalog.filtered.length) ui.warn("No item matches", term);
+	if (!catalog.filtered.length || scale) ui.warn("No item matches", lookup);
 }
 
 async function pick(item: Item) {

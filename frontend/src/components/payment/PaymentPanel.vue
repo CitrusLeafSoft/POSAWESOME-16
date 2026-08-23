@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /** Tender screen. Big targets, tabular numbers, and one obvious primary action. */
-import { computed, ref } from "vue";
-import { ArrowLeft, Banknote, Check, CheckCircle2, Loader2, Printer, Plus } from "lucide-vue-next";
-import { formatCurrency, toNumber } from "@/lib/format";
+import { computed, watch } from "vue";
+import { ArrowLeft, Banknote, Check, CheckCircle2, Coins, Printer, Plus } from "lucide-vue-next";
+import { formatCurrency, formatFloat, toNumber } from "@/lib/format";
 import { usePaymentsStore } from "@/stores/payments";
 import { useCartStore } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
 import { useOffersStore } from "@/stores/offers";
-import { api } from "@/lib/api";
 
 const payments = usePaymentsStore();
 const cart = useCartStore();
@@ -18,8 +17,23 @@ const offers = useOffersStore();
 const QUICK = [5, 10, 20, 50, 100, 200, 500];
 
 const done = computed(() => !!payments.lastInvoice);
-const printing = ref(false);
 const isReturn = computed(() => cart.isReturn);
+/** Loyalty redemption shows whenever the customer carries a balance to spend. */
+const canRedeem = computed(
+	() =>
+		!isReturn.value &&
+		toNumber(cart.customerInfo?.loyalty_points) > 0 &&
+		toNumber(cart.customerInfo?.conversion_factor) > 0,
+);
+
+// Totals can settle after entry (taxes arriving with the draft save); while the
+// cashier has not touched the amounts, keep tender pinned to what is owed.
+watch(
+	() => payments.payable,
+	() => {
+		if (!done.value && !payments.touched) payments.tenderExact();
+	},
+);
 
 function back() {
 	ui.setWorkspace("catalog");
@@ -39,26 +53,17 @@ function nextSale() {
 	ui.setWorkspace("catalog");
 }
 
-async function print() {
+function commitRedemption(event: Event) {
+	const raw = (event.target as HTMLInputElement).value.trim();
+	cart.setLoyaltyRedemption(toNumber(raw));
+	payments.tenderExact();
+}
+
+/** Open the in-page print dialog; the browser's print sheet stays over this view. */
+function print() {
 	const name = payments.lastInvoice?.name as string | undefined;
 	if (!name) return;
-	printing.value = true;
-	try {
-		const result = await api.printInvoice(name);
-		const win = window.open("", "_blank");
-		if (!win) {
-			ui.warn("Pop-up blocked", "Allow pop-ups to print receipts.");
-			return;
-		}
-		win.document.write(result.html);
-		win.document.close();
-		win.focus();
-		win.print();
-	} catch (error) {
-		ui.fail("Could not print", error instanceof Error ? error.message : String(error));
-	} finally {
-		printing.value = false;
-	}
+	ui.openModal("print", { invoiceName: name });
 }
 </script>
 
@@ -93,11 +98,9 @@ async function print() {
 				<button
 					type="button"
 					class="flex h-11 items-center justify-center gap-2 rounded-card border border-line font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
-					:disabled="printing"
 					@click="print"
 				>
-					<Loader2 v-if="printing" class="size-4 animate-spin" />
-					<Printer v-else class="size-4" />
+					<Printer class="size-4" />
 					Print receipt
 				</button>
 			</div>
@@ -152,6 +155,33 @@ async function print() {
 							@input="payments.setAmount(row.mode_of_payment, toNumber(($event.target as HTMLInputElement).value))"
 						/>
 					</div>
+				</div>
+
+				<!-- Loyalty redemption — points settle part of the total before cash -->
+				<div
+					v-if="canRedeem"
+					class="flex items-center gap-2 rounded-card border border-dashed border-violet/40 bg-violet-soft/40 p-2"
+				>
+					<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-soft text-violet">
+						<Coins class="size-4" />
+					</span>
+					<label class="min-w-0 flex-1 text-sm font-medium" for="loyalty-redeem">
+						Redeem loyalty
+						<span class="block text-[11px] font-normal text-subtle">
+							{{ formatFloat(cart.customerInfo?.loyalty_points ?? 0, 0) }} pts available ·
+							{{ formatCurrency(cart.maxLoyaltyAmount) }}
+						</span>
+					</label>
+					<input
+						id="loyalty-redeem"
+						:value="cart.loyaltyAmount || ''"
+						type="text"
+						inputmode="decimal"
+						placeholder="0.00"
+						class="h-10 w-28 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-accent focus:ring-0"
+						@focus="($event.target as HTMLInputElement).select()"
+						@change="commitRedemption($event)"
+					/>
 				</div>
 
 				<!-- Quick cash -->

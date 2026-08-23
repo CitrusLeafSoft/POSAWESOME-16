@@ -491,19 +491,59 @@ def get_applicable_delivery_charges(company, pos_profile, customer, shipping_add
 
 
 @frappe.whitelist()
-def get_invoice_print_html(invoice, print_format=None, letterhead=None):
+def get_print_options(invoice):
+	"""Print formats and letterheads the print dialog offers for one invoice."""
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	doc.check_permission("read")
+
+	default_format = frappe.get_cached_value("POS Profile", doc.pos_profile, "print_format")
+	formats = [
+		row.name
+		for row in frappe.get_all(
+			"Print Format",
+			filters={"doc_type": "Sales Invoice", "disabled": 0},
+			fields=["name"],
+			order_by="name",
+			limit_page_length=0,
+		)
+	]
+	if default_format and default_format not in formats:
+		formats.insert(0, default_format)
+
+	letterheads = [
+		row.name
+		for row in frappe.get_all(
+			"Letterhead",
+			filters={"disabled": 0},
+			fields=["name"],
+			order_by="name",
+			limit_page_length=0,
+		)
+	]
+
+	return {
+		"default_print_format": default_format or (formats[0] if formats else None),
+		"print_formats": formats,
+		"default_letterhead": frappe.get_cached_value("Letterhead", {"is_default": 1, "disabled": 0}, "name"),
+		"letterheads": letterheads,
+	}
+
+
+@frappe.whitelist()
+def get_invoice_print_html(invoice, print_format=None, letterhead=None, no_letterhead=0):
 	"""Rendered invoice HTML so the SPA can print without leaving the page."""
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	doc.check_permission("read")
 
 	print_format = print_format or frappe.get_cached_value("POS Profile", doc.pos_profile, "print_format")
+	suppress_letterhead = cint(no_letterhead) or not letterhead
 
 	html = frappe.get_print(
 		"Sales Invoice",
 		invoice,
 		print_format=print_format,
-		letterhead=letterhead,
-		no_letterhead=0 if letterhead else 1,
+		letterhead=None if suppress_letterhead else letterhead,
+		no_letterhead=1 if suppress_letterhead else 0,
 	)
 	return {"html": html, "print_format": print_format}
 

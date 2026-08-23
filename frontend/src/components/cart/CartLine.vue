@@ -6,7 +6,7 @@ import { useCartStore } from "@/stores/cart";
 import { useSessionStore } from "@/stores/session";
 import type { CartItem } from "@/types";
 
-const props = defineProps<{ line: CartItem; index: number }>();
+const props = defineProps<{ line: CartItem }>();
 
 const cart = useCartStore();
 const session = useSessionStore();
@@ -33,12 +33,11 @@ function commitQty(event: Event) {
 
 <template>
 	<div
-		class="stagger group relative cursor-pointer px-3 py-2.5 transition"
+		class="group relative cursor-pointer px-3 py-2.5 transition"
 		:class="[
 			selected ? 'bg-accent-soft/45' : 'hover:bg-surface-2',
 			bumped && 'animate-bump',
 		]"
-		:style="{ '--i': index }"
 		@click="cart.selectedRowId = line.posa_row_id"
 	>
 		<span

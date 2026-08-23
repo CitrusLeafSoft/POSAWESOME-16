@@ -29,6 +29,8 @@ export const usePaymentsStore = defineStore("payments", () => {
 
 	const rows = ref<TenderRow[]>([]);
 	const submitting = ref(false);
+	/** True once the cashier edits amounts by hand — auto-tender then stands down. */
+	const touched = ref(false);
 	/** The invoice that was just completed, for the success panel and reprint. */
 	const lastInvoice = ref<Record<string, unknown> | null>(null);
 
@@ -37,7 +39,9 @@ export const usePaymentsStore = defineStore("payments", () => {
 	const sign = computed(() => (cart.isReturn ? -1 : 1));
 
 	const paid = computed(() => money(rows.value.reduce((sum, row) => sum + toNumber(row.amount), 0)));
-	const payable = computed(() => cart.payableAmount);
+	/** Redemption covers part of the total before any cash is counted. */
+	const redeemed = computed(() => (cart.isReturn ? 0 : money(cart.loyaltyAmount || 0)));
+	const payable = computed(() => money(Math.max(cart.payableAmount - redeemed.value, 0)));
 	/** Signed shortfall: still owed on a sale, still to refund on a return. */
 	const remaining = computed(() => money(payable.value - paid.value));
 	/** Magnitude still outstanding, whichever way the money is moving. */
@@ -62,6 +66,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 			type: method.type,
 			default: !!method.default,
 		}));
+		touched.value = false;
 	}
 
 	function reset() {
@@ -74,6 +79,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 		const row = rows.value.find((entry) => entry.mode_of_payment === mode);
 		if (!row) return;
 		row.amount = money(sign.value * Math.max(Math.abs(toNumber(value)), 0));
+		touched.value = true;
 	}
 
 	function addAmount(mode: string, delta: number) {
@@ -81,6 +87,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 		if (!row) return;
 		const magnitude = Math.max(Math.abs(row.amount) + Math.abs(delta), 0);
 		row.amount = money(sign.value * magnitude);
+		touched.value = true;
 	}
 
 	/** Drop the whole balance onto one mode — the common single-tender case. */
@@ -109,6 +116,15 @@ export const usePaymentsStore = defineStore("payments", () => {
 			if (!draft?.name) {
 				ui.fail("Could not save the invoice");
 				return null;
+			}
+
+			// Saving can move the total (first-time taxes, discount resolution).
+			// While the cashier has not hand-tuned amounts, follow the server so
+			// paid_amount lands exactly on grand_total — otherwise submission is
+			// rejected for being short or over.
+			if (!touched.value) {
+				clear();
+				tenderExact();
 			}
 
 			const invoice = {
@@ -153,6 +169,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 	return {
 		rows,
 		submitting,
+		touched,
 		lastInvoice,
 		sign,
 		paid,

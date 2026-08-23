@@ -42,10 +42,20 @@ watch(
 	() => offers.refresh(),
 );
 
-function toPayment() {
+async function toPayment() {
 	if (cart.isEmpty || !cart.customer) {
 		ui.warn(cart.isEmpty ? "The cart is empty" : "Pick a customer first");
 		return;
+	}
+	// Save first so taxes and discounts are settled before amounts are tendered —
+	// tendering against a total the server is about to change is how "Pay" ends
+	// up rejecting every sale.
+	if (cart.dirty) {
+		try {
+			await cart.saveDraft();
+		} catch {
+			// A failed save surfaces its own toast at submit time.
+		}
 	}
 	payments.build();
 	payments.tenderExact();

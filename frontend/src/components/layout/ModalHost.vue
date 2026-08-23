@@ -13,6 +13,7 @@ const registry: Record<string, ReturnType<typeof defineAsyncComponent>> = {
 	variants: defineAsyncComponent(() => import("@/components/pos/VariantsModal.vue")),
 	customer: defineAsyncComponent(() => import("@/components/customer/CustomerFormModal.vue")),
 	invoiceDetails: defineAsyncComponent(() => import("@/components/cart/InvoiceDetailsModal.vue")),
+	print: defineAsyncComponent(() => import("@/components/payment/PrintModal.vue")),
 };
 
 const current = computed(() => (ui.modal ? registry[ui.modal.name] : null));

@@ -168,18 +168,18 @@ async function hold() {
 				</p>
 			</div>
 
-			<TransitionGroup
-				v-else
-				tag="div"
-				class="divide-y divide-line"
-				enter-active-class="transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-				enter-from-class="-translate-y-2 opacity-0"
-				leave-active-class="absolute w-full transition duration-200"
-				leave-to-class="translate-x-8 opacity-0"
-				move-class="transition duration-300"
-			>
-				<CartLine v-for="(line, i) in cart.items" :key="line.posa_row_id" :line="line" :index="i" />
-			</TransitionGroup>
+		<TransitionGroup
+			v-else
+			tag="div"
+			class="relative divide-y divide-line"
+			enter-active-class="transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+			enter-from-class="-translate-y-2 opacity-0"
+			leave-active-class="absolute inset-x-0 transition duration-200 ease-out pointer-events-none"
+			leave-to-class="translate-x-8 opacity-0"
+			move-class="transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+		>
+			<CartLine v-for="line in cart.items" :key="line.posa_row_id" :line="line" />
+		</TransitionGroup>
 		</div>
 
 		<CartTotals v-if="!cart.isEmpty" />

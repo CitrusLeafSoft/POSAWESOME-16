@@ -182,6 +182,14 @@ async function request<T>(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** What the print dialog offers for one invoice. */
+export interface PrintOptions {
+	default_print_format: string | null;
+	print_formats: string[];
+	default_letterhead: string | null;
+	letterheads: string[];
+}
+
 /* -------------------------------------------------------------------------- */
 /* Namespaced helpers for the endpoints this app actually uses                 */
 /* -------------------------------------------------------------------------- */
@@ -237,8 +245,15 @@ export const api = {
 		call<unknown>(`${NS}.invoice_api.create_sales_invoice_from_order`, { sales_order }),
 	deliveryCharges: (payload: Record<string, unknown>) =>
 		call<unknown>(`${NS}.invoice_api.get_applicable_delivery_charges`, payload),
-	printInvoice: (invoice: string, print_format?: string) =>
-		call<{ html: string }>(`${NS}.invoice_api.get_invoice_print_html`, { invoice, print_format }),
+	printInvoice: (invoice: string, print_format?: string, letterhead?: string | null, no_letterhead?: boolean) =>
+		call<{ html: string; print_format: string }>(`${NS}.invoice_api.get_invoice_print_html`, {
+			invoice,
+			print_format,
+			letterhead,
+			no_letterhead: no_letterhead ? 1 : 0,
+		}),
+	printOptions: (invoice: string) =>
+		call<PrintOptions>(`${NS}.invoice_api.get_print_options`, { invoice }),
 
 	/* Offers & coupons */
 	offers: (profile: string) => call<unknown>(`${NS}.offers.get_offers`, { profile }),
