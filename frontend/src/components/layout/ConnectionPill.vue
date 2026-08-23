@@ -25,7 +25,8 @@ const state = computed(() => {
 
 function onClick() {
 	// With sales waiting, the useful action is seeing them — not re-probing a
-	// connection the pill already reports on.
+	// connection the pill already reports on. Offline with an empty queue, retrying
+	// the connection is the useful one.
 	if (sync.hasOutstanding) ui.openModal("queue");
 	else void session.probe();
 }

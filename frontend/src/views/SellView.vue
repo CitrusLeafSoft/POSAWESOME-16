@@ -21,7 +21,6 @@ import CartPanel from "@/components/cart/CartPanel.vue";
 import PaymentPanel from "@/components/payment/PaymentPanel.vue";
 import OffersPanel from "@/components/payment/OffersPanel.vue";
 import CouponsPanel from "@/components/payment/CouponsPanel.vue";
-import ModalHost from "@/components/layout/ModalHost.vue";
 
 const cart = useCartStore();
 const catalog = useCatalogStore();
@@ -135,6 +134,5 @@ onUnmounted(stop);
 			<CartPanel @pay="toPayment" />
 		</div>
 
-		<ModalHost />
 	</div>
 </template>

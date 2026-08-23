@@ -16,6 +16,7 @@ import { createApp, h } from "vue";
 import { createPinia } from "pinia";
 import SellView from "./views/SellView.vue";
 import ToastHost from "./components/layout/ToastHost.vue";
+import ModalHost from "./components/layout/ModalHost.vue";
 import { configureFormatting } from "./lib/format";
 import { initHotkeys } from "./lib/hotkeys";
 import { initTheme } from "./lib/theme";
@@ -91,7 +92,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 Object.defineProperty(navigator, "onLine", { get: () => networkUp, configurable: true });
 
 const app = createApp({
-	setup: () => () => h("div", { class: "h-dvh bg-bg text-fg" }, [h(SellView), h(ToastHost)]),
+	setup: () => () => h("div", { class: "h-dvh bg-bg text-fg" }, [h(SellView), h(ModalHost), h(ToastHost)]),
 });
 app.config.warnHandler = (msg) => bump("vue-warn", msg);
 app.use(createPinia());
@@ -231,6 +232,30 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 	await tick();
 	await sync.refresh();
 	reportOffline(`drained (${drained.length} result(s), ${syncCalls} sync call(s))`, queued, sync);
+
+	/* ---- does the queue dialog actually mount? -------------------------- */
+	const ui = useUiStore();
+	// Put something in the queue so the dialog has rows to draw.
+	networkUp = false;
+	session.serverReachable = false;
+	await payments.submit();
+	await tick();
+
+	ui.openModal("queue");
+	for (let i = 0; i < 40; i += 1) await tick();   // async component needs a tick
+
+	const el = document.createElement("pre");
+	const dialog = document.querySelector('[role="dialog"]');
+	el.textContent = [
+		"STAGE           : opened the queue dialog",
+		`ui.modal        : ${JSON.stringify(ui.modal)}`,
+		`role=dialog     : ${dialog ? "present" : "MISSING"}`,
+		`dialog heading  : ${dialog?.querySelector("h2")?.textContent ?? "-"}`,
+		`rows drawn      : ${dialog?.querySelectorAll("li").length ?? 0}`,
+		`queue entries   : ${sync.entries.length}`,
+		`console         : ${[...seen.entries()].map(([k, n]) => `${n}x ${k}`).join(" || ") || "none"}`,
+	].join("\n");
+	document.body.append(el);
 	} catch (e) {
 		const el = document.createElement("pre");
 		el.textContent = `OFFLINE BLOCK THREW: ${e instanceof Error ? e.stack ?? e.message : String(e)}`;

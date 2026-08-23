@@ -13,6 +13,7 @@ import AppTopBar from "@/components/layout/AppTopBar.vue";
 import ToastHost from "@/components/layout/ToastHost.vue";
 import BusyVeil from "@/components/layout/BusyVeil.vue";
 import HotkeyHelp from "@/components/layout/HotkeyHelp.vue";
+import ModalHost from "@/components/layout/ModalHost.vue";
 import BootScreen from "@/components/layout/BootScreen.vue";
 
 const session = useSessionStore();
@@ -64,6 +65,11 @@ watch(
 				</RouterView>
 			</main>
 		</template>
+
+		<!-- Global, because the chrome that opens dialogs is global. This used to live
+		     inside SellView, so a button in the top bar could set the modal state on any
+		     other route and nothing would render it. -->
+		<ModalHost />
 
 		<ToastHost />
 		<BusyVeil />
