@@ -156,7 +156,10 @@ async function hold() {
 		</header>
 
 		<!-- Lines -->
-		<div class="min-h-0 flex-1 overflow-y-auto border-t border-line">
+		<!-- overflow-x must be stated: with only overflow-y set, CSS promotes the
+		     visible axis to auto, and any transform that leaves the box gets a
+		     horizontal scrollbar. -->
+		<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden border-t border-line">
 			<div
 				v-if="cart.isEmpty"
 				class="flex h-full flex-col items-center justify-center gap-2 p-8 text-center"
@@ -172,10 +175,10 @@ async function hold() {
 			v-else
 			tag="div"
 			class="relative divide-y divide-line"
-			enter-active-class="transition duration-[320ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]"
-			enter-from-class="translate-x-6 scale-[0.98] opacity-0"
-			leave-active-class="absolute inset-x-0 transition duration-200 ease-out pointer-events-none"
-			leave-to-class="translate-x-8 opacity-0"
+			enter-active-class="transition duration-[280ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+			enter-from-class="-translate-y-3 scale-[0.985] opacity-0"
+			leave-active-class="absolute inset-x-0 transition duration-[180ms] ease-out pointer-events-none"
+			leave-to-class="scale-[0.97] opacity-0"
 			move-class="transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
 		>
 			<CartLine v-for="line in cart.items" :key="line.posa_row_id" :line="line" />
