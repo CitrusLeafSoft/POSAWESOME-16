@@ -587,6 +587,18 @@ export const useCartStore = defineStore("cart", () => {
 		customerInfo.value = null;
 	}
 
+	/**
+	 * Abandon a return in progress and go back to selling.
+	 *
+	 * Nothing has been submitted at this point, so there is nothing to reverse — the
+	 * cart is simply cleared. Separate from `reset()` so the caller reads as the
+	 * intent ("changed my mind") rather than as the mechanism.
+	 */
+	function cancelReturn() {
+		if (!isReturn.value) return;
+		reset();
+	}
+
 	function loadFromDoc(doc: Record<string, unknown>, options: { asReturn?: boolean } = {}) {
 		reset();
 		invoiceName.value = options.asReturn ? null : ((doc.name as string) ?? null);
@@ -723,6 +735,7 @@ export const useCartStore = defineStore("cart", () => {
 		toInvoicePayload,
 		adoptServerDoc,
 		reset,
+		cancelReturn,
 		loadFromDoc,
 		bump,
 	};

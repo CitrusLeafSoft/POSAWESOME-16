@@ -233,6 +233,55 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 	await sync.refresh();
 	reportOffline(`drained (${drained.length} result(s), ${syncCalls} sync call(s))`, queued, sync);
 
+	/* ---- returns --------------------------------------------------------- */
+	networkUp = true;
+	session.serverReachable = true;
+	session.online = true;
+	cart.reset();
+	payments.reset();
+
+	// A submitted invoice, as search_invoices_for_return hands it back.
+	const SOLD = {
+		name: "SINV-SOLD-1", customer: "Walk-in", customer_name: "Walk-in",
+		posting_date: "2026-08-20", grand_total: 100, discount_amount: 0,
+		additional_discount_percentage: 0, taxes: [], posa_offers: [], posa_coupons: [],
+		items: [{
+			name: "row-a", item_code: "PROBE-1", item_name: "Probe Item", description: "",
+			stock_uom: "Nos", uom: "Nos", conversion_factor: 1, qty: 2, rate: 50,
+			price_list_rate: 50, amount: 100, discount_percentage: 0, discount_amount: 0,
+			warehouse: "Main - PC",
+		}],
+	};
+
+	cart.loadFromDoc(SOLD, { asReturn: true });
+	payments.reset();
+	payments.tenderExact();
+	await tick();
+
+	const rp = document.createElement("pre");
+	rp.textContent = [
+		"STAGE           : return started",
+		`isReturn        : ${cart.isReturn}  returnAgainst=${cart.returnAgainst}`,
+		`lines / qty     : ${cart.items.length} / ${cart.items.map((i) => i.qty).join(",")}`,
+		`cart payable    : ${cart.payableAmount}`,
+		`payments.payable: ${payments.payable}`,
+		`tendered        : ${payments.paid}  rows=${payments.rows.map((r) => `${r.mode_of_payment}=${r.amount}`).join(",")}`,
+		`settled         : ${payments.settled}   canSubmit=${payments.canSubmit}`,
+	].join("\n");
+	document.body.append(rp);
+
+	cart.cancelReturn();
+	payments.reset();
+	await tick();
+	const cp = document.createElement("pre");
+	cp.textContent = [
+		"STAGE           : return cancelled",
+		`isReturn        : ${cart.isReturn}  returnAgainst=${cart.returnAgainst}`,
+		`lines           : ${cart.items.length}`,
+		`tendered        : ${payments.paid}`,
+	].join("\n");
+	document.body.append(cp);
+
 	/* ---- does the queue dialog actually mount? -------------------------- */
 	const ui = useUiStore();
 	// Put something in the queue so the dialog has rows to draw.

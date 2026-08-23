@@ -57,7 +57,13 @@ export const usePaymentsStore = defineStore("payments", () => {
 	const redeemed = computed(() =>
 		cart.isReturn ? 0 : money(toNumber(cart.loyaltyAmount) + creditApplied.value),
 	);
-	const payable = computed(() => money(Math.max(cart.payableAmount - redeemed.value, 0)));
+	const payable = computed(() => {
+		const gross = cart.payableAmount - redeemed.value;
+		// Only a sale can never fall below zero. A refund's total is negative by
+		// design, and clamping it to zero left nothing to tender — so `canSubmit`,
+		// which wants a non-zero paid amount, refused every refund outright.
+		return money(cart.isReturn ? gross : Math.max(gross, 0));
+	});
 	/** Signed shortfall: still owed on a sale, still to refund on a return. */
 	const remaining = computed(() => money(payable.value - paid.value));
 	/** Magnitude still outstanding, whichever way the money is moving. */

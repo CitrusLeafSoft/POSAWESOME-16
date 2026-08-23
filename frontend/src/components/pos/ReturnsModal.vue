@@ -5,11 +5,13 @@ import { Loader2, Search, Undo2 } from "lucide-vue-next";
 import { api } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useCartStore } from "@/stores/cart";
+import { usePaymentsStore } from "@/stores/payments";
 import { useSessionStore } from "@/stores/session";
 import { useUiStore } from "@/stores/ui";
 import ModalShell from "@/components/common/ModalShell.vue";
 
 const cart = useCartStore();
+const payments = usePaymentsStore();
 const session = useSessionStore();
 const ui = useUiStore();
 
@@ -38,6 +40,13 @@ function startReturn(doc: Record<string, unknown>) {
 	// loadFromDoc negates quantities and records the per-row ceiling, so a return
 	// can never exceed what was actually sold.
 	cart.loadFromDoc(doc, { asReturn: true });
+
+	// Tender the refund straight away. The amount is not a decision the cashier makes
+	// — it is what the original invoice says — so making them type it invites a
+	// mistake and leaves the screen showing zero to refund.
+	payments.reset();
+	payments.tenderExact();
+
 	ui.closeModal();
 	ui.notify({ title: "Return started", detail: `Against ${doc.name}`, tone: "warning" });
 }

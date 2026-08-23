@@ -16,10 +16,12 @@ import {
 	Undo2,
 	UserPen,
 	UserPlus,
+	X,
 } from "lucide-vue-next";
 import { useCartStore } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
 import { useOffersStore } from "@/stores/offers";
+import { usePaymentsStore } from "@/stores/payments";
 import { useSessionStore } from "@/stores/session";
 import CustomerPicker from "@/components/customer/CustomerPicker.vue";
 import CartLine from "./CartLine.vue";
@@ -30,10 +32,23 @@ const emit = defineEmits<{ pay: [] }>();
 const cart = useCartStore();
 const ui = useUiStore();
 const offers = useOffersStore();
+const payments = usePaymentsStore();
 const session = useSessionStore();
 
 const holding = ref(false);
 const canPay = computed(() => !cart.isEmpty && !!cart.customer);
+
+function abandonReturn() {
+	const against = cart.returnAgainst;
+	cart.cancelReturn();
+	payments.reset();
+	offers.reset();
+	ui.notify({
+		title: "Return cancelled",
+		detail: against ? `Nothing was refunded against ${against}.` : undefined,
+		tone: "info",
+	});
+}
 
 async function hold() {
 	if (cart.isEmpty || !cart.customer) {
@@ -93,6 +108,16 @@ async function hold() {
 
 			<!-- Invoice actions -->
 			<div class="flex items-center gap-1 overflow-x-auto pb-0.5">
+				<!-- A return in progress is a mode, so it needs a visible way out. Nothing
+				     has been submitted yet, so abandoning it just clears the cart. -->
+				<button
+					v-if="cart.isReturn"
+					type="button"
+					class="inline-flex shrink-0 items-center gap-1.5 rounded-card bg-danger-soft px-2.5 py-1.5 text-xs font-semibold text-danger transition hover:opacity-85"
+					@click="abandonReturn"
+				>
+					<X class="size-3.5" /> Cancel return
+				</button>
 				<button
 					type="button"
 					class="inline-flex shrink-0 items-center gap-1.5 rounded-card px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
@@ -201,9 +226,9 @@ async function hold() {
 			<button
 				type="button"
 				class="flex h-13 w-13 shrink-0 items-center justify-center rounded-card border border-line bg-surface text-muted shadow-xs transition hover:border-warning hover:text-warning disabled:opacity-40"
-				title="Hold this invoice"
-				aria-label="Hold this invoice"
-				:disabled="!canPay || holding"
+				:title="cart.isReturn ? 'A return cannot be held' : 'Hold this invoice'"
+				:aria-label="cart.isReturn ? 'A return cannot be held' : 'Hold this invoice'"
+				:disabled="!canPay || holding || cart.isReturn"
 				@click="hold"
 			>
 				<Loader2 v-if="holding" class="size-5 animate-spin" />
@@ -211,12 +236,18 @@ async function hold() {
 			</button>
 			<button
 				type="button"
-				class="flex h-13 min-w-0 flex-1 items-center justify-center gap-2 rounded-card bg-accent text-base font-semibold text-accent-fg shadow-glow transition hover:bg-accent-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-subtle disabled:shadow-none"
+				class="flex h-13 min-w-0 flex-1 items-center justify-center gap-2 rounded-card text-base font-semibold shadow-glow transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-subtle disabled:shadow-none"
+				:class="
+					cart.isReturn
+						? 'bg-danger text-white hover:opacity-90'
+						: 'bg-accent text-accent-fg hover:bg-accent-hover'
+				"
 				:disabled="!canPay"
 				@click="emit('pay')"
 			>
-				<CreditCard class="size-5" />
-				Pay
+				<Undo2 v-if="cart.isReturn" class="size-5" />
+				<CreditCard v-else class="size-5" />
+				{{ cart.isReturn ? "Refund" : "Pay" }}
 				<kbd class="ml-1 rounded bg-black/15 px-1.5 py-0.5 font-mono text-[11px]">F8</kbd>
 			</button>
 		</footer>

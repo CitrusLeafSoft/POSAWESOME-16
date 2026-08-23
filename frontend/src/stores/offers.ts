@@ -57,6 +57,13 @@ export const useOffersStore = defineStore("offers", () => {
 	function refresh() {
 		if (!catalogOffers.value.length) return;
 
+		// A credit note mirrors the invoice it reverses. Re-running promotions against
+		// it changes the amount refunded — measured, a 10% offer turned a 100 refund
+		// into 90 while the tender still said 100 — and the customer is owed what they
+		// actually paid. Whatever the original invoice carried travels with it through
+		// loadFromDoc; nothing new is evaluated.
+		if (cart.isReturn) return;
+
 		const context = {
 			items: cart.items,
 			total: cart.totals.total,
