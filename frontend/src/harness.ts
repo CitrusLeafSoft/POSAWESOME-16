@@ -1,0 +1,157 @@
+/**
+ * Freeze probe.
+ *
+ * Mounts the sell screen against seeded stores and a stubbed backend, drives it the
+ * way a cashier would, and reports whether Vue is looping. A "frozen" POS is almost
+ * always Vue hitting its recursive-update ceiling: it logs once and then wedges the
+ * render loop, which is invisible unless something is watching the console.
+ *
+ * Boot is bypassed on purpose — the point is the sell screen, not the shift dialog.
+ * Development entry only; not in the production build.
+ */
+import { createApp, h } from "vue";
+import { createPinia } from "pinia";
+import SellView from "./views/SellView.vue";
+import ToastHost from "./components/layout/ToastHost.vue";
+import { configureFormatting } from "./lib/format";
+import { initHotkeys } from "./lib/hotkeys";
+import { initTheme } from "./lib/theme";
+import { useCartStore } from "./stores/cart";
+import { useCatalogStore } from "./stores/catalog";
+import { useOffersStore } from "./stores/offers";
+import { usePaymentsStore } from "./stores/payments";
+import { useSessionStore } from "./stores/session";
+import type { Item } from "./types";
+import "./styles/main.css";
+
+/* ---- console capture --------------------------------------------------- */
+const seen = new Map<string, number>();
+const bump = (kind: string, text: string) => {
+	const key = `${kind}: ${text.slice(0, 150)}`;
+	seen.set(key, (seen.get(key) ?? 0) + 1);
+};
+const realWarn = console.warn.bind(console);
+console.warn = (...a: unknown[]) => { bump("warn", a.map(String).join(" ")); realWarn(...a); };
+addEventListener("error", (e) => bump("uncaught", String(e.message)));
+addEventListener("unhandledrejection", (e) => bump("rejection", String((e as PromiseRejectionEvent).reason)));
+
+/* ---- count how often the offer engine runs ----------------------------- */
+let refreshCalls = 0;
+
+/* ---- stubbed backend --------------------------------------------------- */
+const OFFER = {
+	name: "Probe 10 Percent", title: "Probe 10 Percent", offer: "Grand Total",
+	apply_on: "Transaction", discount_type: "Discount Percentage", discount_percentage: 10,
+	coupon_based: 1, auto: 0,
+};
+const FLAT = {
+	name: "Probe 50 Off", title: "Probe 50 Off", offer: "Grand Total",
+	apply_on: "Transaction", discount_type: "Discount Amount", discount_amount: 50,
+	min_amt: 0, coupon_based: 1, auto: 0,
+};
+const WANT = new URLSearchParams(location.search).get("offer") === "flat" ? FLAT : OFFER;
+const ROUTES: [string, unknown][] = [
+	["offers.get_offers", [WANT]],
+	["offers.get_pos_coupon", { msg: "Apply", coupon: { coupon_code: "PROBE", pos_offer: WANT.name } }],
+	["customer.get_available_credit", []],
+	["catalog.get_item_detail", { income_account: "Sales", cost_center: "Main" }],
+	["invoice_api.update_invoice", { name: "SINV-PROBE-1", items: [], taxes: [] }],
+];
+window.fetch = (async (input: RequestInfo | URL) => {
+	const url = String(typeof input === "string" ? input : (input as Request).url ?? input);
+	const hit = ROUTES.find(([k]) => url.includes(k));
+	return new Response(JSON.stringify({ message: hit ? hit[1] : [] }), {
+		status: 200, headers: { "Content-Type": "application/json" },
+	});
+}) as typeof fetch;
+
+const app = createApp({
+	setup: () => () => h("div", { class: "h-dvh bg-bg text-fg" }, [h(SellView), h(ToastHost)]),
+});
+app.config.warnHandler = (msg) => bump("vue-warn", msg);
+app.use(createPinia());
+initTheme();
+initHotkeys();
+app.mount("#app");
+
+/* ---- seed -------------------------------------------------------------- */
+configureFormatting({ numberFormat: "#,###.##", currency: "SAR", currencySymbol: "SAR",
+	currencyPrecision: 2, floatPrecision: 3, dateFormat: "dd-mm-yyyy" });
+
+const session = useSessionStore();
+session.profile = {
+	name: "Probe POS", company: "Probe Co", currency: "SAR", warehouse: "Main - PC",
+	selling_price_list: "Standard Selling",
+	payments: [{ mode_of_payment: "Cash", default: 1, type: "Cash" }],
+	posa_allow_user_to_edit_additional_discount: 1,
+	posa_allow_user_to_edit_rate: 1, posa_allow_user_to_edit_item_discount: 1,
+	use_customer_credit: 1, posa_allow_return: 1,
+} as never;
+session.company = { company_name: "Probe Co" } as never;
+session.ready = true;
+session.booting = false;
+
+const ITEM: Item = {
+	item_code: "PROBE-1", item_name: "Probe Item", stock_uom: "Nos", image: null,
+	is_stock_item: 1, has_variants: 0, item_group: "All Item Groups",
+	has_batch_no: 0, has_serial_no: 0, rate: 100, currency: "SAR",
+	actual_qty: 99, item_barcode: [],
+};
+const catalog = useCatalogStore();
+catalog.load = async () => {};
+catalog.loadGroups = async () => {};
+catalog.items = [ITEM];
+
+const cart = useCartStore();
+const offers = useOffersStore();
+const payments = usePaymentsStore();
+
+// Wrap refresh so a runaway shows up as a call count, not as a hang.
+const originalRefresh = offers.refresh;
+offers.refresh = ((...args: unknown[]) => {
+	refreshCalls += 1;
+	if (refreshCalls > 500) throw new Error("refresh() runaway: called 500+ times");
+	return (originalRefresh as (...a: unknown[]) => unknown)(...args);
+}) as typeof offers.refresh;
+
+/* ---- drive it ---------------------------------------------------------- */
+function report(stage: string) {
+	const el = document.getElementById("out") ?? Object.assign(document.createElement("pre"), { id: "out" });
+	const recursive = [...seen.entries()].filter(([k]) => /recursive|Maximum/i.test(k));
+	el.textContent = [
+		`STAGE           : ${stage}`,
+		`refresh() calls : ${refreshCalls}`,
+		`cart lines      : ${cart.items.length}`,
+		`offer          : ${WANT.name}`,
+		`addl discount % : ${cart.additionalDiscountPercentage}`,
+		`addl discount   : ${cart.additionalDiscount}`,
+		`grand total     : ${cart.totals.grandTotal}`,
+		`coupons applied : ${offers.coupons.length}`,
+		`RECURSIVE LOOP  : ${recursive.length ? recursive.map(([k, n]) => `${n}x ${k}`).join(" | ") : "none"}`,
+		`messages        : ${[...seen.entries()].map(([k, n]) => `${n}x ${k}`).join("\n                  ") || "none"}`,
+	].join("\n");
+	document.body.append(el);
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 30));
+
+(async () => {
+	await tick();
+	await offers.load();
+	await cart.addItem(ITEM);
+	await tick();
+	report("item added");
+
+	try {
+		await offers.applyCoupon("PROBE");
+	} catch (e) {
+		bump("applyCoupon threw", String(e));
+	}
+	await tick(); await tick();
+	report("coupon applied");
+
+	payments.build();
+	payments.tenderExact();
+	await tick();
+	report("tendered");
+})();

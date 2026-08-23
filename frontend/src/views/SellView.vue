@@ -37,8 +37,14 @@ onMounted(async () => {
 });
 
 // Offers depend on the cart, so re-evaluate whenever it settles.
+//
+// An ARRAY OF GETTERS, not a getter returning an array. Vue compares the former
+// element by element; the latter it compares by identity, and a fresh array literal
+// is never identical to the last one. Since offers.refresh() reassigns cart.items —
+// a dependency of this very watcher — the array form re-fired itself on every pass
+// and wedged the render loop after ~200 rounds. Every click after that did nothing.
 watch(
-	() => [cart.items.length, cart.totals.total],
+	[() => cart.items.length, () => cart.totals.total],
 	() => offers.refresh(),
 );
 

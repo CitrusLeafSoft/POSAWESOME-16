@@ -74,11 +74,21 @@ export const useOffersStore = defineStore("offers", () => {
 
 		const result = reconcile(matched, cart.appliedOffers, context, catalogOffers.value, enabled.value);
 
-		cart.items = result.items;
+		// Only write back when something really moved. reconcile() always returns fresh
+		// clones, so assigning unconditionally marked the cart dirty and re-triggered
+		// every deep watcher on it for no reason — and made the loop above far easier
+		// to fall into.
+		if (linesChanged(cart.items, result.items)) cart.items = result.items;
 		cart.appliedOffers = result.applied;
 
 		if (result.grandTotalOfferName) {
-			cart.setAdditionalDiscount(result.grandTotalDiscountPercentage, "percentage");
+			// Whichever way the offer is configured; setAdditionalDiscount keeps the two
+			// mutually exclusive, so passing the mode through is enough.
+			if (result.grandTotalDiscountAmount > 0) {
+				cart.setAdditionalDiscount(result.grandTotalDiscountAmount, "amount");
+			} else {
+				cart.setAdditionalDiscount(result.grandTotalDiscountPercentage, "percentage");
+			}
 		}
 
 		for (const title of result.loyaltyOffersApplied) {
@@ -93,6 +103,29 @@ export const useOffersStore = defineStore("offers", () => {
 				tone: "warning",
 			});
 		}
+	}
+
+	/** Cheap comparison of the fields the offer engine is allowed to move. */
+	function linesChanged(before: typeof cart.items, after: typeof cart.items): boolean {
+		if (before.length !== after.length) return true;
+		for (let i = 0; i < before.length; i += 1) {
+			const a = before[i];
+			const b = after[i];
+			if (
+				a.posa_row_id !== b.posa_row_id ||
+				a.item_code !== b.item_code ||
+				a.qty !== b.qty ||
+				a.rate !== b.rate ||
+				a.discount_percentage !== b.discount_percentage ||
+				a.discount_amount !== b.discount_amount ||
+				a.is_free_item !== b.is_free_item ||
+				a.posa_is_offer !== b.posa_is_offer ||
+				a.posa_offers !== b.posa_offers
+			) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	function toggle(rowId: string, on: boolean) {

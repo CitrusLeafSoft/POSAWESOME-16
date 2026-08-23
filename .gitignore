@@ -1,14 +1,14 @@
-.DS_Store
-*.pyc
-*.egg-info
-*.swp
-tags
-posawesome/docs/current
-node_modules
-posawesome/public/dist
 # Vite/TS local caches. The built bundle under posawesome/public/posawesome and the
-# generated www/posawesome.html are committed on purpose: they reference each other
 # by content hash, and Frappe's own `bench build` does not run vite, so a fresh
 # clone has to be servable without a Node toolchain.
-frontend/tsconfig.tsbuildinfo
+# generated www/posawesome.html are committed on purpose: they reference each other
+*.egg-info
+*.pyc
+*.swp
+.DS_Store
 frontend/dist
+frontend/tsconfig.tsbuildinfo
+node_modules
+posawesome/docs/current
+posawesome/public/dist
+tags

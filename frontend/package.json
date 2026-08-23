@@ -9,7 +9,8 @@
     "build:fast": "vite build --base=/assets/posawesome/posawesome/ && npm run copy-html-entry",
     "copy-html-entry": "node scripts/copy-html-entry.mjs",
     "typecheck": "vue-tsc -b --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "harness": "vite --port 8099"
   },
   "dependencies": {
     "@vueuse/core": "^13.9.0",

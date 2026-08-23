@@ -196,6 +196,8 @@ export interface ReconcileResult {
 	applied: AppliedOffer[];
 	/** Invoice-level discount owed to a Grand Total offer, if any. */
 	grandTotalDiscountPercentage: number;
+	/** A Grand Total offer can be a flat amount instead of a percentage. */
+	grandTotalDiscountAmount: number;
 	grandTotalOfferName: string | null;
 	/** Loyalty offers that fired, for the operator to see. */
 	loyaltyOffersApplied: string[];
@@ -219,6 +221,7 @@ export function reconcile(
 	const applied: AppliedOffer[] = [];
 	const loyaltyOffersApplied: string[] = [];
 	let grandTotalDiscountPercentage = 0;
+	let grandTotalDiscountAmount = 0;
 	let grandTotalOfferName: string | null = null;
 
 	const eligibleByRow = new Map(eligible.map((offer) => [offer.row_id, offer]));
@@ -240,8 +243,21 @@ export function reconcile(
 				break;
 
 			case "Grand Total": {
+				// A Grand Total offer is configured either way round. Only the percentage
+				// was honoured before, so an offer set up as a flat "50 off" qualified,
+				// reported itself applied, and discounted nothing.
+				if (grandTotalOfferName) break;
+
 				const percentage = toNumber(offer.discount_percentage);
-				if (percentage > 0 && percentage <= 100 && !grandTotalOfferName) {
+				const amount = toNumber(offer.discount_amount);
+
+				if (offer.discount_type === "Discount Amount" || (!percentage && amount > 0)) {
+					if (amount > 0) {
+						// Never give away more than the sale is worth.
+						grandTotalDiscountAmount = Math.min(amount, toNumber(context.total));
+						grandTotalOfferName = offer.name;
+					}
+				} else if (percentage > 0 && percentage <= 100) {
 					grandTotalDiscountPercentage = percentage;
 					grandTotalOfferName = offer.name;
 				}
@@ -273,7 +289,14 @@ export function reconcile(
 		items = tagItems(record, offer.items, items);
 	}
 
-	return { items, applied, grandTotalDiscountPercentage, grandTotalOfferName, loyaltyOffersApplied };
+	return {
+		items,
+		applied,
+		grandTotalDiscountPercentage,
+		grandTotalDiscountAmount,
+		grandTotalOfferName,
+		loyaltyOffersApplied,
+	};
 }
 
 function applyItemPrice(offer: EligibleOffer, items: CartItem[]): CartItem[] {

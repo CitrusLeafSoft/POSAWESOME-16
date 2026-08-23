@@ -65,7 +65,8 @@ async function loadCharges() {
 	}
 }
 
-watch(() => [cart.customer, cart.shippingAddress], () => void loadCharges());
+// Array of getters, compared element-wise — see the note in SellView.
+watch([() => cart.customer, () => cart.shippingAddress], () => void loadCharges());
 
 function chargeRate(row: DeliveryCharge): number {
 	return toNumber(row.rate ?? row.charges);
