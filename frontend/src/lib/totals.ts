@@ -124,6 +124,9 @@ export function calculateTotals(input: TotalsInput): Totals {
 
 	const discountOnNet = applyDiscountOn !== "Grand Total";
 	if (discountOnNet && discountAmount) {
+		// Never give away more than is being sold. Typing 400 against a 180 basket used
+		// to produce a negative grand total — a till proposing to pay the customer.
+		discountAmount = money(Math.min(discountAmount, netTotal));
 		netTotal = money(netTotal - discountAmount);
 	}
 
@@ -178,6 +181,8 @@ export function calculateTotals(input: TotalsInput): Totals {
 		// Discount on Grand Total: the base only exists once taxes are in, so a
 		// percentage is resolved here — even when no explicit amount was typed.
 		if (discountPercentage) discountAmount = money((grandTotal * discountPercentage) / 100);
+		// Capped for the same reason as the net-total branch above.
+		discountAmount = money(Math.min(discountAmount, grandTotal));
 		grandTotal = money(grandTotal - discountAmount);
 	}
 

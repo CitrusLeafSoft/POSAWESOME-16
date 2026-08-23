@@ -33,6 +33,15 @@ export const useOffersStore = defineStore("offers", () => {
 	const coupons = ref<Coupon[]>([]);
 	const giftCoupons = ref<string[]>([]);
 
+	/** An offer's invoice discount is standing aside for one the cashier typed. */
+	const invoiceDiscountOverridden = computed(
+		() =>
+			cart.additionalDiscountSource === "manual" &&
+			eligible.value.some(
+				(offer) => offer.offer === "Grand Total" && enabled.value.has(offer.row_id),
+			),
+	);
+
 	const availableCount = computed(() => eligible.value.length);
 	const appliedCount = computed(() => cart.appliedOffers.length);
 	/** Eligible but not yet switched on — what the "new offers" badge counts. */
@@ -92,9 +101,9 @@ export const useOffersStore = defineStore("offers", () => {
 			// Whichever way the offer is configured; setAdditionalDiscount keeps the two
 			// mutually exclusive, so passing the mode through is enough.
 			if (result.grandTotalDiscountAmount > 0) {
-				cart.setAdditionalDiscount(result.grandTotalDiscountAmount, "amount");
+				cart.setAdditionalDiscount(result.grandTotalDiscountAmount, "amount", "offer");
 			} else {
-				cart.setAdditionalDiscount(result.grandTotalDiscountPercentage, "percentage");
+				cart.setAdditionalDiscount(result.grandTotalDiscountPercentage, "percentage", "offer");
 			}
 		}
 
@@ -262,6 +271,7 @@ export const useOffersStore = defineStore("offers", () => {
 		coupons,
 		giftCoupons,
 		availableCount,
+		invoiceDiscountOverridden,
 		appliedCount,
 		pendingCount,
 		redeemableLoyalty,

@@ -44,6 +44,15 @@ export const useCartStore = defineStore("cart", () => {
 
 	const additionalDiscount = ref(0);
 	const additionalDiscountPercentage = ref(0);
+	/**
+	 * Who set the invoice-level discount.
+	 *
+	 * There is one such discount on a Sales Invoice, and both the offer engine and the
+	 * cashier want it. Without knowing which of them put the current value there, the
+	 * engine overwrote a typed amount on the next cart change and the cashier's
+	 * discount silently vanished.
+	 */
+	const additionalDiscountSource = ref<"manual" | "offer" | null>(null);
 
 	const appliedOffers = ref<AppliedOffer[]>([]);
 	const appliedCoupons = ref<Coupon[]>([]);
@@ -405,8 +414,17 @@ export const useCartStore = defineStore("cart", () => {
 		markDirty();
 	}
 
-	function setAdditionalDiscount(value: number, mode: "amount" | "percentage") {
-		if (!session.profile?.posa_allow_user_to_edit_additional_discount) {
+	function setAdditionalDiscount(
+		value: number,
+		mode: "amount" | "percentage",
+		source: "manual" | "offer" = "manual",
+	) {
+		// A cashier's explicit discount outranks an offer's. The offer engine re-runs on
+		// every cart change, so without this the typed figure lasts until the next scan.
+		if (source === "offer" && additionalDiscountSource.value === "manual") {
+			if (additionalDiscount.value || additionalDiscountPercentage.value) return;
+		}
+		if (source === "manual" && !session.profile?.posa_allow_user_to_edit_additional_discount) {
 			ui.warn("Additional discounts are not allowed on this POS profile");
 			return;
 		}
@@ -417,6 +435,9 @@ export const useCartStore = defineStore("cart", () => {
 			additionalDiscount.value = Math.max(money(value), 0);
 			additionalDiscountPercentage.value = 0;
 		}
+		// Back to nothing means nobody owns it, so an offer may claim it again.
+		additionalDiscountSource.value =
+			additionalDiscount.value || additionalDiscountPercentage.value ? source : null;
 		markDirty();
 	}
 
@@ -560,11 +581,13 @@ export const useCartStore = defineStore("cart", () => {
 	/* ------------------------------------------------------------- lifecycle */
 
 	function reset() {
+		clearBumps();
 		invoiceName.value = null;
 		items.value = [];
 		taxes.value = [];
 		additionalDiscount.value = 0;
 		additionalDiscountPercentage.value = 0;
+		additionalDiscountSource.value = null;
 		appliedOffers.value = [];
 		appliedCoupons.value = [];
 		loyaltyPointsRedeemed.value = 0;
@@ -668,13 +691,38 @@ export const useCartStore = defineStore("cart", () => {
 
 	/** Row ids that should play the "just changed" animation. */
 	const bumped = ref<Set<string>>(new Set());
+	/** Pending un-bump per row, so repeated presses extend rather than restart. */
+	const bumpTimers = new Map<string, number>();
+
+	/**
+	 * Flash a line to acknowledge it just changed.
+	 *
+	 * Each press used to set its own timer, so scanning the same item four times
+	 * stripped and re-added the class four times and the animation stuttered through
+	 * it. The class is applied once and its removal is pushed back instead: CSS will
+	 * not restart an animation whose class never left, so the nudge plays once and
+	 * the line simply stays lit while the presses keep coming.
+	 */
 	function bump(rowId: string) {
-		bumped.value = new Set(bumped.value).add(rowId);
-		setTimeout(() => {
-			const next = new Set(bumped.value);
-			next.delete(rowId);
-			bumped.value = next;
-		}, 400);
+		const pending = bumpTimers.get(rowId);
+		if (pending !== undefined) window.clearTimeout(pending);
+		else bumped.value = new Set(bumped.value).add(rowId);
+
+		bumpTimers.set(
+			rowId,
+			window.setTimeout(() => {
+				bumpTimers.delete(rowId);
+				const next = new Set(bumped.value);
+				next.delete(rowId);
+				bumped.value = next;
+			}, 400),
+		);
+	}
+
+	function clearBumps() {
+		for (const timer of bumpTimers.values()) window.clearTimeout(timer);
+		bumpTimers.clear();
+		bumped.value = new Set();
 	}
 
 	// Any structural change invalidates the saved draft.
@@ -697,6 +745,7 @@ export const useCartStore = defineStore("cart", () => {
 		deliveryChargesRate,
 		additionalDiscount,
 		additionalDiscountPercentage,
+		additionalDiscountSource,
 		appliedOffers,
 		appliedCoupons,
 		loyaltyPointsRedeemed,

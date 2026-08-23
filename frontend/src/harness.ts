@@ -233,6 +233,47 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 	await sync.refresh();
 	reportOffline(`drained (${drained.length} result(s), ${syncCalls} sync call(s))`, queued, sync);
 
+	/* ---- discount: coupon + item discount + a typed amount --------------- */
+	networkUp = true;
+	session.serverReachable = true;
+	cart.reset();
+	payments.reset();
+	offers.reset();
+	await offers.load();
+
+	await cart.addItem(ITEM);          // 100
+	await cart.addItem(ITEM);          // qty 2 -> 200
+	await tick();
+	cart.setLineDiscount(cart.items[0].posa_row_id, 10, "percentage");   // 10% off the line
+	await tick();
+	await offers.applyCoupon("PROBE"); // Grand Total 10% offer
+	await tick();
+
+	const snap = (label: string) => [
+		label.padEnd(30),
+		`total=${cart.totals.total}`,
+		`pct=${cart.additionalDiscountPercentage}`,
+		`amt=${cart.additionalDiscount}`,
+		`discountApplied=${cart.totals.discountAmount}`,
+		`grand=${cart.totals.grandTotal}`,
+	].join("  ");
+
+	const lines: string[] = [snap("after coupon")];
+
+	// The cashier types 400 into the invoice discount field.
+	cart.setAdditionalDiscount(400, "amount");
+	await tick();
+	lines.push(snap("after typing 400"));
+
+	// ...and then touches the cart at all, which re-runs the offer engine.
+	await cart.addItem(ITEM);
+	await tick(); await tick();
+	lines.push(snap("after adding one more"));
+
+	const dp = document.createElement("pre");
+	dp.textContent = "STAGE           : discount interaction\n" + lines.join("\n");
+	document.body.append(dp);
+
 	/* ---- returns --------------------------------------------------------- */
 	networkUp = true;
 	session.serverReachable = true;

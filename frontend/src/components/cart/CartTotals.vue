@@ -2,9 +2,11 @@
 import { computed } from "vue";
 import { formatCurrency, formatFloat, toNumber } from "@/lib/format";
 import { useCartStore } from "@/stores/cart";
+import { useOffersStore } from "@/stores/offers";
 import { useSessionStore } from "@/stores/session";
 
 const cart = useCartStore();
+const offers = useOffersStore();
 const session = useSessionStore();
 
 const t = computed(() => cart.totals);
@@ -54,6 +56,13 @@ function commit(event: Event) {
 				@change="commit($event)"
 			/>
 		</div>
+
+		<p
+			v-if="offers.invoiceDiscountOverridden"
+			class="rounded-card bg-info-soft px-2 py-1.5 text-[11px] leading-snug text-info"
+		>
+			Your discount is being used instead of the offer's. Clear it to put the offer back.
+		</p>
 
 		<div v-for="tax in t.taxes" :key="tax.idx" class="flex justify-between text-muted">
 			<span class="truncate pr-2">{{ tax.description || tax.account_head }}</span>
