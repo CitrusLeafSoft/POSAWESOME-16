@@ -1,0 +1,241 @@
+{#-
+	POS Print Format — 80 mm thermal receipt.
+
+	Three things this has to survive that a desk print format does not:
+
+	The riyal sign (U+20C1) has no glyph in any stock OS font, and a receipt is
+	rendered outside the POS bundle — by wkhtmltopdf, or in a bare print iframe — so
+	the webfont the app ships is not there. Printed as a character it is a tofu box.
+	It is drawn as inline SVG instead, which every renderer here can handle.
+
+	Gold lines carry a weight breakdown when the Goldsmith app is installed. Every
+	access to those fields goes through .get(), so this format works unchanged in a
+	shop that sells anything else.
+
+	Numbers are grouped and fixed to two decimals directly rather than through
+	fmt_money, because fmt_money prepends the currency symbol as text and that is the
+	exact problem being avoided.
+-#}
+<style>
+	@page { size: 80mm auto; margin: 0; }
+	body {
+		font-family: 'DejaVu Sans', Arial, sans-serif;
+		width: 80mm; max-width: 80mm; margin: 0 auto; padding: 10px;
+		font-size: 11px; line-height: 1.4; color: #000;
+	}
+	.c { text-align: center; }
+	.b { font-weight: bold; }
+	.muted { color: #555; }
+	.rule { border-top: 1px dashed #333; margin: 10px 0; }
+	.row { display: table; width: 100%; margin: 3px 0; }
+	.row > span:first-child { display: table-cell; text-align: left; width: 58%; }
+	.row > span:last-child  { display: table-cell; text-align: right; width: 42%; white-space: nowrap; }
+	.head { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
+	.meta { font-size: 10px; line-height: 1.55; margin-bottom: 10px; }
+	.item { margin-bottom: 9px; }
+	.item-name { font-weight: bold; font-size: 11px; margin-bottom: 2px; }
+	.item-sub { font-size: 10px; color: #555; }
+	.gold {
+		font-size: 9px; color: #6b4c14; background: #faf5e8;
+		padding: 3px 5px; margin-top: 3px; border-radius: 3px; line-height: 1.5;
+	}
+	.disc { font-size: 9px; color: #1c7a3e; padding-left: 8px; }
+	.serial { font-size: 9px; color: #666; background: #f5f5f5; padding: 3px 5px; margin-top: 3px; border-radius: 3px; }
+	.note { font-size: 9px; color: #666; font-style: italic; padding-left: 8px; }
+	.total { font-size: 14px; font-weight: bold; border-top: 2px solid #000; padding-top: 6px; margin-top: 6px; }
+	.due { font-size: 12px; font-weight: bold; color: #a12; background: #fff3cd; padding: 5px; margin-top: 6px; border-radius: 3px; }
+	.free { color: #1c7a3e; font-weight: bold; }
+	.foot { border-top: 2px solid #000; margin-top: 13px; padding-top: 9px; text-align: center; font-size: 10px; }
+	.qr { margin-top: 8px; }
+	.qr img { width: 108px; height: 108px; }
+	.sym { height: .82em; width: auto; vertical-align: -.06em; fill: currentColor; }
+</style>
+
+{#- Currency. SAR gets the drawn mark; anything else uses its own symbol. -#}
+{%- set sar_path = "M699.62,1113.02h0c-20.06,44.48-33.32,92.75-38.4,143.37l424.51-90.24c20.06-44.47,33.31-92.75,38.4-143.37l-424.51,90.24Z M1085.73,895.8c20.06-44.47,33.32-92.75,38.4-143.37l-330.68,70.33v-135.2l292.27-62.11c20.06-44.47,33.32-92.75,38.4-143.37l-330.68,70.27V66.13c-50.67,28.45-95.67,66.32-132.25,110.99v403.35l-132.25,28.11V0c-50.67,28.44-95.67,66.32-132.25,110.99v525.69l-295.91,62.88c-20.06,44.47-33.33,92.75-38.42,143.37l334.33-71.05v170.26l-358.3,76.14c-20.06,44.47-33.32,92.75-38.4,143.37l375.04-79.7c30.53-6.35,56.77-24.4,73.83-49.24l68.78-101.97v-.02c7.14-10.55,11.3-23.27,11.3-36.97v-149.98l132.25-28.11v270.4l424.53-90.28Z" -%}
+{%- set is_sar = doc.currency == "SAR" -%}
+{%- set fallback_symbol = frappe.db.get_value("Currency", doc.currency, "symbol") or doc.currency -%}
+
+{%- macro sym() -%}
+	{%- if is_sar -%}<svg class="sym" viewBox="0 0 1124.14 1256.39" xmlns="http://www.w3.org/2000/svg"><path d="{{ sar_path }}"/></svg>
+	{%- else -%}{{ fallback_symbol }}{%- endif -%}
+{%- endmacro -%}
+
+{%- macro n(v) -%}{{ "{:,.2f}".format(v | float) }}{%- endmacro -%}
+{%- macro money(v) -%}{{ sym() }} {{ n(v) }}{%- endmacro -%}
+{%- macro g(v) -%}{{ "{:,.3f}".format(v | float) }}{%- endmacro -%}
+
+{%- set company = frappe.get_cached_doc("Company", doc.company) -%}
+
+<!-- ─── Header ─── -->
+<div class="c head">{{ company.company_name }}</div>
+{%- if company.get("company_name_arabic") %}
+<div class="c b" style="font-size:13px;margin-bottom:2px">{{ company.company_name_arabic }}</div>
+{%- endif %}
+{%- if company.get("tax_id") %}
+<div class="c muted" style="font-size:9px">VAT {{ company.tax_id }}</div>
+{%- endif %}
+<div class="c" style="font-size:11px;margin:6px 0 10px">
+	{%- if doc.is_return %}CREDIT NOTE{% else %}TAX INVOICE{% endif -%}
+</div>
+
+<!-- ─── Invoice meta ─── -->
+<div class="meta">
+	<div><b>No:</b> {{ doc.name }}</div>
+	<div><b>Date:</b> {{ frappe.utils.formatdate(doc.posting_date) }} {{ (doc.posting_time | string).split('.')[0] if doc.posting_time else '' }}</div>
+	{%- if doc.customer_name %}
+	<div><b>Customer:</b> {{ doc.customer_name }}</div>
+	{%- endif %}
+	{%- if doc.get("tax_id") %}
+	<div><b>Customer VAT:</b> {{ doc.tax_id }}</div>
+	{%- endif %}
+	{%- if doc.get("posa_pos_opening_shift") %}
+	<div><b>Shift:</b> {{ doc.posa_pos_opening_shift }}</div>
+	{%- endif %}
+	<div><b>Served by:</b> {{ frappe.db.get_value("User", doc.owner, "full_name") or doc.owner }}</div>
+	{#- Partial means something was paid and something is still owed. Comparing the
+	    outstanding against grand_total instead read a wholly unpaid rounded invoice as
+	    partial, because rounding makes outstanding a few halalas less than the
+	    unrounded total. -#}
+	{%- if (doc.paid_amount | float) > 0 and (doc.outstanding_amount | float) > 0 %}
+	<div class="b" style="color:#a12"><b>Status:</b> PARTIAL PAYMENT</div>
+	{%- endif %}
+</div>
+
+<div class="rule"></div>
+
+<!-- ─── Lines ─── -->
+{%- set ns = namespace(gold_weight=0, gold_metal=0, gold_making=0, has_gold=false) -%}
+{%- for item in doc.items %}
+<div class="item">
+	<div class="item-name">
+		{{ item.item_name }}
+		{%- if item.get("gold_karat") %} <span style="color:#6b4c14">[{{ item.gold_karat }}]</span>{% endif -%}
+		{%- if item.is_free_item %} <span class="free">({{ _("FREE") }})</span>{% endif -%}
+	</div>
+
+	<div class="row item-sub">
+		{%- if item.is_free_item -%}
+		<span class="free">{{ "{:g}".format(item.qty | float) }} &times; {{ _("FREE") }}</span>
+		<span class="b free">{{ money(0) }}</span>
+		{%- else -%}
+		<span>{{ "{:g}".format(item.qty | float) }} &times; {{ money(item.price_list_rate or item.rate) }}</span>
+		<span class="b">{{ money(item.qty * (item.price_list_rate or item.rate)) }}</span>
+		{%- endif -%}
+	</div>
+
+	{#- Gold breakdown, when the Goldsmith app is filling these in. Customers ask
+	    what they paid for the metal and what for the work; a total cannot answer it. -#}
+	{%- if item.get("gold_karat") and item.get("net_gold_weight") -%}
+		{%- set ns.has_gold = true -%}
+		{%- set ns.gold_weight = ns.gold_weight + (item.net_gold_weight | float) -%}
+		{%- set ns.gold_metal = ns.gold_metal + (item.get("metal_amount") | float) -%}
+		{%- set ns.gold_making = ns.gold_making + (item.get("making_charge_amount") | float) -%}
+	<div class="gold">
+		<div>{{ _("Net gold") }} {{ g(item.net_gold_weight) }} g &times; {{ money(item.get("gold_rate_per_gram")) }}/g</div>
+		<div>
+			{{ _("Metal") }} {{ money(item.get("metal_amount")) }}
+			{%- if item.get("making_charge_amount") | float > 0 %} &nbsp;·&nbsp; {{ _("Making") }} {{ money(item.making_charge_amount) }}{% endif -%}
+		</div>
+	</div>
+	{%- endif -%}
+
+	{%- if item.discount_percentage or item.discount_amount %}
+	<div class="row disc">
+		<span>{{ _("Discount") }}{% if item.discount_percentage %} ({{ "%.1f"|format(item.discount_percentage) }}%){% endif %}</span>
+		<span>-{{ money(item.discount_amount or 0) }}</span>
+	</div>
+	{%- endif %}
+
+	{%- if item.serial_no %}
+	<div class="serial"><b>{{ _("Serial") }}:</b> {{ item.serial_no | replace("\n", ", ") }}</div>
+	{%- endif %}
+
+	{%- if item.get("posa_notes") %}
+	<div class="note">{{ item.posa_notes }}</div>
+	{%- endif %}
+</div>
+{%- endfor %}
+
+<div class="rule"></div>
+
+<!-- ─── Totals ─── -->
+<div class="row"><span>{{ _("Subtotal") }}</span><span>{{ money(doc.net_total) }}</span></div>
+
+{%- if doc.discount_amount %}
+<div class="row" style="color:#1c7a3e">
+	<span>{{ _("Discount") }}{% if doc.additional_discount_percentage %} ({{ "%.1f"|format(doc.additional_discount_percentage) }}%){% endif %}</span>
+	<span>-{{ money(doc.discount_amount | abs) }}</span>
+</div>
+{%- endif %}
+
+{#- Each charge on its own line: a lumped "Tax" is not a VAT breakdown. -#}
+{%- for tax in doc.taxes %}
+	{%- if tax.tax_amount %}
+<div class="row"><span>{{ tax.description or tax.account_head }}</span><span>{{ money(tax.tax_amount) }}</span></div>
+	{%- endif %}
+{%- endfor %}
+
+{%- if doc.get("posa_delivery_charges_rate") | float > 0 %}
+<div class="row"><span>{{ _("Delivery") }}</span><span>{{ money(doc.posa_delivery_charges_rate) }}</span></div>
+{%- endif %}
+
+{%- if doc.rounding_adjustment %}
+<div class="row muted" style="font-size:10px"><span>{{ _("Rounding") }}</span><span>{{ money(doc.rounding_adjustment) }}</span></div>
+{%- endif %}
+
+<div class="row total">
+	<span>{{ _("TOTAL") }}</span>
+	<span>{{ money(doc.rounded_total or doc.grand_total) }}</span>
+</div>
+
+{%- if ns.has_gold %}
+<div class="gold" style="margin-top:6px">
+	<div class="b">{{ _("Gold on this invoice") }}</div>
+	<div>{{ _("Net weight") }} {{ g(ns.gold_weight) }} g</div>
+	<div>{{ _("Metal") }} {{ money(ns.gold_metal) }} &nbsp;·&nbsp; {{ _("Making") }} {{ money(ns.gold_making) }}</div>
+</div>
+{%- endif %}
+
+<!-- ─── Payments ─── -->
+{%- if doc.payments %}
+<div class="rule"></div>
+<div class="b" style="margin-bottom:4px">{{ _("Payment") }}</div>
+{%- for payment in doc.payments %}
+	{%- if payment.amount %}
+<div class="row" style="font-size:10px"><span>{{ payment.mode_of_payment }}</span><span>{{ money(payment.amount) }}</span></div>
+	{%- endif %}
+{%- endfor %}
+{%- if doc.get("loyalty_amount") | float > 0 %}
+<div class="row" style="font-size:10px"><span>{{ _("Loyalty") }} ({{ doc.get("loyalty_points") or 0 }} pts)</span><span>{{ money(doc.loyalty_amount) }}</span></div>
+{%- endif %}
+<div class="row b" style="margin-top:4px;border-top:1px solid #ccc;padding-top:3px">
+	<span>{{ _("Paid") }}</span><span>{{ money(doc.paid_amount or 0) }}</span>
+</div>
+{%- if doc.change_amount and doc.change_amount > 0 %}
+<div class="row b" style="font-size:10px"><span>{{ _("Change") }}</span><span>{{ money(doc.change_amount) }}</span></div>
+{%- endif %}
+{%- endif %}
+
+{%- if doc.outstanding_amount and doc.outstanding_amount > 0 %}
+<div class="row due"><span>{{ _("BALANCE DUE") }}</span><span>{{ money(doc.outstanding_amount) }}</span></div>
+{%- endif %}
+
+{#- ZATCA QR, only where the Goldsmith app has provided the helper. -#}
+{%- if get_zatca_qr_data_uri is defined %}
+	{%- set qr = get_zatca_qr_data_uri(doc) -%}
+	{%- if qr %}
+<div class="c qr"><img src="{{ qr }}" alt="QR"></div>
+	{%- endif %}
+{%- endif %}
+
+<!-- ─── Footer ─── -->
+<div class="foot">
+	{%- if doc.get("terms") %}
+	<div class="muted" style="font-size:9px;margin-bottom:5px">{{ doc.terms }}</div>
+	{%- endif %}
+	<div style="font-size:11px">{{ _("Thank you") }}</div>
+	{%- if company.get("phone_no") %}
+	<div class="muted" style="font-size:9px;margin-top:3px">{{ company.phone_no }}</div>
+	{%- endif %}
+</div>
