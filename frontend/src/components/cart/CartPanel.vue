@@ -172,8 +172,8 @@ async function hold() {
 			v-else
 			tag="div"
 			class="relative divide-y divide-line"
-			enter-active-class="transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-			enter-from-class="-translate-y-2 opacity-0"
+			enter-active-class="transition duration-[320ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+			enter-from-class="translate-x-6 scale-[0.98] opacity-0"
 			leave-active-class="absolute inset-x-0 transition duration-200 ease-out pointer-events-none"
 			leave-to-class="translate-x-8 opacity-0"
 			move-class="transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"

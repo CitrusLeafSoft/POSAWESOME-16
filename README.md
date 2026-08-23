@@ -110,7 +110,10 @@ Available in GitHub [discussions](https://github.com/WaleedAboHashima/POSAWESOME
 
 ### Contributing
 
-Will using for this the same guidelines from Erpnext
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, the checks your PR must pass, and how we work.
+
+General guidelines follow Erpnext:
 
 1. [Issue Guidelines](https://github.com/frappe/erpnext/wiki/Issue-Guidelines)
 2. [Pull Request Requirements](https://github.com/frappe/erpnext/wiki/Contribution-Guidelines)
