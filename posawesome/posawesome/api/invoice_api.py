@@ -490,14 +490,8 @@ def get_applicable_delivery_charges(company, pos_profile, customer, shipping_add
 # ---------------------------------------------------------------------------
 
 
-@frappe.whitelist()
-def get_print_options(invoice):
-	"""Print formats and letterheads the print dialog offers for one invoice."""
-	doc = frappe.get_doc("Sales Invoice", invoice)
-	doc.check_permission("read")
-
-	default_format = frappe.get_cached_value("POS Profile", doc.pos_profile, "print_format")
-	formats = [
+def _sales_invoice_print_formats():
+	return [
 		row.name
 		for row in frappe.get_all(
 			"Print Format",
@@ -507,13 +501,53 @@ def get_print_options(invoice):
 			limit_page_length=0,
 		)
 	]
+
+
+def _resolve_print_format(doc, requested=None):
+	"""Which format a receipt should use, in order of how deliberate the choice is.
+
+	The POS Profile is the shop's own decision and wins. Failing that, the doctype's
+	configured default is what the desk would print, and matching it means the receipt
+	from the till and the reprint from the desk are the same document. Only then do we
+	fall back to whatever exists, which is otherwise an alphabetical accident.
+	"""
+	if requested:
+		return requested
+
+	profile_format = (
+		frappe.get_cached_value("POS Profile", doc.pos_profile, "print_format")
+		if doc.pos_profile
+		else None
+	)
+	if profile_format:
+		return profile_format
+
+	meta_default = frappe.get_meta("Sales Invoice").default_print_format
+	if meta_default:
+		return meta_default
+
+	formats = _sales_invoice_print_formats()
+	return formats[0] if formats else None
+
+
+@frappe.whitelist()
+def get_print_options(invoice):
+	"""Print formats and letterheads the print dialog offers for one invoice."""
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	doc.check_permission("read")
+
+	formats = _sales_invoice_print_formats()
+	default_format = _resolve_print_format(doc)
 	if default_format and default_format not in formats:
 		formats.insert(0, default_format)
 
+	# The doctype is "Letter Head", two words. Querying "Letterhead" raised
+	# DoesNotExistError, which took the whole dialog down with it — no formats, no
+	# preview, nothing to print.
 	letterheads = [
 		row.name
 		for row in frappe.get_all(
-			"Letterhead",
+			"Letter Head",
 			filters={"disabled": 0},
 			fields=["name"],
 			order_by="name",
@@ -522,9 +556,11 @@ def get_print_options(invoice):
 	]
 
 	return {
-		"default_print_format": default_format or (formats[0] if formats else None),
+		"default_print_format": default_format,
 		"print_formats": formats,
-		"default_letterhead": frappe.get_cached_value("Letterhead", {"is_default": 1, "disabled": 0}, "name"),
+		"default_letterhead": frappe.db.get_value(
+			"Letter Head", {"is_default": 1, "disabled": 0}, "name"
+		),
 		"letterheads": letterheads,
 	}
 
@@ -535,7 +571,9 @@ def get_invoice_print_html(invoice, print_format=None, letterhead=None, no_lette
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	doc.check_permission("read")
 
-	print_format = print_format or frappe.get_cached_value("POS Profile", doc.pos_profile, "print_format")
+	# Same resolution as the dialog's own default, so the preview and the printed
+	# sheet cannot be two different documents.
+	print_format = _resolve_print_format(doc, print_format)
 	suppress_letterhead = cint(no_letterhead) or not letterhead
 
 	html = frappe.get_print(
