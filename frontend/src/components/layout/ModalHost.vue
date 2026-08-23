@@ -13,6 +13,8 @@ const registry: Record<string, ReturnType<typeof defineAsyncComponent>> = {
 	variants: defineAsyncComponent(() => import("@/components/pos/VariantsModal.vue")),
 	customer: defineAsyncComponent(() => import("@/components/customer/CustomerFormModal.vue")),
 	invoiceDetails: defineAsyncComponent(() => import("@/components/cart/InvoiceDetailsModal.vue")),
+	mpesa: defineAsyncComponent(() => import("@/components/payment/MpesaModal.vue")),
+	queue: defineAsyncComponent(() => import("@/components/pos/SyncQueueModal.vue")),
 	print: defineAsyncComponent(() => import("@/components/payment/PrintModal.vue")),
 };
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Create or edit a customer without leaving the till. */
 import { onMounted, ref } from "vue";
-import { Loader2, UserPlus } from "lucide-vue-next";
+import { Gift, Loader2, UserPlus } from "lucide-vue-next";
 import { useCustomerStore } from "@/stores/customers";
 import { useCartStore } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
@@ -20,8 +20,15 @@ const form = ref({
 	gender: "",
 	customer_type: "Individual",
 	birthday: "",
+	/** Someone else's code, entered when this customer was referred in.
+	 *  Named for the endpoint's argument, not the stored fieldname — save_customer
+	 *  maps `referral_code` onto Customer.posa_referral_code. */
+	referral_code: "",
 });
 const saving = ref(false);
+/** This customer's own code, created by the server on insert. Read-only. */
+const ownReferralCode = ref("");
+const copied = ref(false);
 
 onMounted(async () => {
 	if (!props.customerId) return;
@@ -35,8 +42,23 @@ onMounted(async () => {
 		gender: info.gender ?? "",
 		customer_type: info.customer_type ?? "Individual",
 		birthday: info.birthday ?? "",
+		referral_code: "",
 	};
+	// Shown rather than edited: the code is issued by the server, and overtyping it
+	// would orphan every coupon already given out against it.
+	ownReferralCode.value = info.posa_referral_code ?? "";
 });
+
+async function copyCode() {
+	if (!ownReferralCode.value) return;
+	try {
+		await navigator.clipboard.writeText(ownReferralCode.value);
+		copied.value = true;
+		setTimeout(() => (copied.value = false), 1500);
+	} catch {
+		ui.warn("Could not copy", "Read the code out instead.");
+	}
+}
 
 async function save() {
 	if (!form.value.customer_name.trim()) {
@@ -45,7 +67,14 @@ async function save() {
 	}
 	saving.value = true;
 	try {
-		const result = await customers.save({ ...form.value, customer_id: props.customerId });
+		// An empty referral code is omitted rather than sent blank: save_customer
+		// writes through any value that is not None, so posting "" on an edit would
+		// wipe a code the customer was already referred in on.
+		const { referral_code, ...rest } = form.value;
+		const payload: Record<string, unknown> = { ...rest, customer_id: props.customerId };
+		if (referral_code.trim()) payload.referral_code = referral_code.trim().toUpperCase();
+
+		const result = await customers.save(payload);
 		// Selecting the new customer is almost always what the cashier wants next.
 		cart.customer = result.name;
 		cart.customerInfo = result;
@@ -129,6 +158,40 @@ async function save() {
 					class="h-10 w-full rounded-card border-line bg-surface text-sm focus:border-accent focus:ring-0"
 				/>
 			</label>
+
+			<!-- Referrals. A code entered here credits whoever sent this customer in;
+			     the code below is this customer's own, for them to pass on. -->
+			<label v-if="!props.customerId" class="block sm:col-span-2">
+				<span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-subtle">
+					Referred by (code)
+				</span>
+				<input
+					v-model="form.referral_code"
+					type="text"
+					autocapitalize="characters"
+					placeholder="Optional"
+					class="h-10 w-full rounded-card border-line bg-surface text-sm font-mono uppercase focus:border-accent focus:ring-0"
+				/>
+			</label>
+
+			<div v-if="ownReferralCode" class="sm:col-span-2">
+				<span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-subtle">
+					Their referral code
+				</span>
+				<div class="flex items-center gap-2 rounded-card border border-line bg-surface-2 p-2">
+					<Gift class="size-4 shrink-0 text-violet" />
+					<span class="min-w-0 flex-1 truncate font-mono text-sm font-semibold">
+						{{ ownReferralCode }}
+					</span>
+					<button
+						type="button"
+						class="h-8 shrink-0 rounded-card border border-line bg-surface px-2.5 text-xs font-semibold transition hover:border-accent hover:text-accent"
+						@click="copyCode"
+					>
+						{{ copied ? "Copied" : "Copy" }}
+					</button>
+				</div>
+			</div>
 		</form>
 
 		<template #footer>

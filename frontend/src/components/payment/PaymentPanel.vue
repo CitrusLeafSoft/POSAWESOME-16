@@ -1,23 +1,45 @@
 <script setup lang="ts">
 /** Tender screen. Big targets, tabular numbers, and one obvious primary action. */
 import { computed, watch } from "vue";
-import { ArrowLeft, Banknote, Check, CheckCircle2, Coins, Printer, Plus } from "lucide-vue-next";
+import {
+	ArrowLeft,
+	Banknote,
+	Check,
+	CheckCircle2,
+	CloudOff,
+	Coins,
+	Loader2,
+	Printer,
+	Plus,
+	Smartphone,
+	WalletCards,
+} from "lucide-vue-next";
 import { formatCurrency, formatFloat, toNumber } from "@/lib/format";
 import { usePaymentsStore } from "@/stores/payments";
 import { useCartStore } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
 import { useOffersStore } from "@/stores/offers";
+import { useSessionStore } from "@/stores/session";
 
 const payments = usePaymentsStore();
 const cart = useCartStore();
 const ui = useUiStore();
 const offers = useOffersStore();
+const session = useSessionStore();
 
 /** Round-number shortcuts a cashier actually reaches for. */
 const QUICK = [5, 10, 20, 50, 100, 200, 500];
 
 const done = computed(() => !!payments.lastInvoice);
+/** A sale parked on the terminal: real to the customer, not yet on the server. */
+const queued = computed(() => !!payments.lastInvoice?.__queued);
 const isReturn = computed(() => cart.isReturn);
+
+/** Credit only shows when the profile allows it and the customer actually has some. */
+const canUseCredit = computed(
+	() => !isReturn.value && !!session.profile?.use_customer_credit && payments.credit.length > 0,
+);
+const mpesaEnabled = computed(() => !!session.profile?.posa_allow_mpesa_reconcile_payments);
 /** Loyalty redemption shows whenever the customer carries a balance to spend. */
 const canRedeem = computed(
 	() =>
@@ -33,6 +55,13 @@ watch(
 	() => {
 		if (!done.value && !payments.touched) payments.tenderExact();
 	},
+);
+
+// Credit belongs to a customer, so a stale list would offer somebody else's money.
+watch(
+	() => cart.customer,
+	() => void payments.loadCredit(),
+	{ immediate: true },
 );
 
 function back() {
@@ -62,8 +91,12 @@ function commitRedemption(event: Event) {
 /** Open the in-page print dialog; the browser's print sheet stays over this view. */
 function print() {
 	const name = payments.lastInvoice?.name as string | undefined;
-	if (!name) return;
+	if (!name || queued.value) return;
 	ui.openModal("print", { invoiceName: name });
+}
+
+function openMpesa() {
+	ui.openModal("mpesa");
 }
 </script>
 
@@ -71,12 +104,22 @@ function print() {
 	<section class="panel flex h-full min-h-0 flex-col overflow-hidden">
 		<!-- Success state -->
 		<div v-if="done" class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-			<span class="grid size-16 place-items-center rounded-full bg-success-soft text-success animate-pop-in">
-				<CheckCircle2 class="size-8" />
+			<span
+				class="grid size-16 place-items-center rounded-full animate-pop-in"
+				:class="queued ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success'"
+			>
+				<CloudOff v-if="queued" class="size-8" />
+				<CheckCircle2 v-else class="size-8" />
 			</span>
 			<div>
-				<h2 class="text-lg font-semibold">{{ isReturn ? "Refund complete" : "Sale complete" }}</h2>
-				<p class="mt-0.5 font-mono text-xs text-subtle">{{ payments.lastInvoice?.name }}</p>
+				<h2 class="text-lg font-semibold">
+					{{ queued ? "Saved on this terminal" : isReturn ? "Refund complete" : "Sale complete" }}
+				</h2>
+				<p v-if="queued" class="mx-auto mt-1 max-w-[19rem] text-xs text-muted">
+					There is no connection, so this sale is waiting on the till. It sends itself as
+					soon as the network is back — take the money and hand over the goods.
+				</p>
+				<p v-else class="mt-0.5 font-mono text-xs text-subtle">{{ payments.lastInvoice?.name }}</p>
 			</div>
 
 			<div v-if="payments.change > 0" class="panel bg-surface-2 px-6 py-4">
@@ -97,7 +140,9 @@ function print() {
 				</button>
 				<button
 					type="button"
-					class="flex h-11 items-center justify-center gap-2 rounded-card border border-line font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
+					class="flex h-11 items-center justify-center gap-2 rounded-card border border-line font-medium text-muted transition hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-45"
+					:disabled="queued"
+					:title="queued ? 'Available once the sale has been sent' : undefined"
 					@click="print"
 				>
 					<Printer class="size-4" />
@@ -183,6 +228,75 @@ function print() {
 						@change="commitRedemption($event)"
 					/>
 				</div>
+
+				<!-- Customer credit — unapplied credit notes and advances on the account -->
+				<div v-if="canUseCredit" class="space-y-2 rounded-card border border-info/40 bg-info-soft/40 p-2">
+					<div class="flex items-center gap-2">
+						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-info-soft text-info">
+							<WalletCards class="size-4" />
+						</span>
+						<div class="min-w-0 flex-1">
+							<p class="text-sm font-medium">Customer credit</p>
+							<p class="text-[11px] text-subtle">
+								{{ formatCurrency(payments.creditAvailable) }} available ·
+								{{ formatCurrency(payments.creditApplied) }} applied
+							</p>
+						</div>
+						<button
+							type="button"
+							class="h-8 rounded-card border border-info px-2.5 text-xs font-semibold text-info transition hover:opacity-85"
+							@click="payments.applyMaxCredit()"
+						>
+							Use max
+						</button>
+						<button
+							v-if="payments.creditApplied > 0"
+							type="button"
+							class="h-8 rounded-card px-2 text-xs font-medium text-subtle transition hover:text-danger"
+							@click="payments.clearCredit()"
+						>
+							Clear
+						</button>
+					</div>
+
+					<div
+						v-for="row in payments.credit"
+						:key="row.credit_origin"
+						class="flex items-center gap-2 ps-11"
+					>
+						<label class="min-w-0 flex-1 truncate text-xs" :for="`credit-${row.credit_origin}`">
+							<span class="font-medium">{{ row.type }}</span>
+							<span class="ms-1 font-mono text-subtle">{{ row.credit_origin }}</span>
+							<span class="ms-1 tnum text-subtle">· {{ formatCurrency(row.total_credit) }}</span>
+						</label>
+						<input
+							:id="`credit-${row.credit_origin}`"
+							:value="row.credit_to_redeem || ''"
+							type="text"
+							inputmode="decimal"
+							placeholder="0.00"
+							class="h-9 w-24 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-info focus:ring-0"
+							@focus="($event.target as HTMLInputElement).select()"
+							@change="payments.setCredit(row.credit_origin, toNumber(($event.target as HTMLInputElement).value))"
+						/>
+					</div>
+				</div>
+
+				<!-- M-Pesa: reconcile a transaction the customer has already sent -->
+				<button
+					v-if="mpesaEnabled"
+					type="button"
+					class="flex w-full items-center gap-2 rounded-card border border-dashed border-success/50 bg-success-soft/30 p-2 text-left transition hover:border-success"
+					@click="openMpesa"
+				>
+					<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-success-soft text-success">
+						<Smartphone class="size-4" />
+					</span>
+					<span class="min-w-0 flex-1">
+						<span class="block text-sm font-medium">M-Pesa</span>
+						<span class="block text-[11px] text-subtle">Match a transaction the customer has paid</span>
+					</span>
+				</button>
 
 				<!-- Quick cash -->
 				<div>

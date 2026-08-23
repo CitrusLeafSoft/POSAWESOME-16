@@ -225,6 +225,8 @@ export interface CustomerInfo {
 	gender?: string;
 	tax_id?: string;
 	posa_discount?: number;
+	/** Auto-created on insert when the company enables referrals. */
+	posa_referral_code?: string;
 }
 
 export interface POSOffer {

@@ -7,6 +7,7 @@
 import { computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useSessionStore } from "@/stores/session";
+import { useSyncStore } from "@/stores/sync";
 import { useUiStore } from "@/stores/ui";
 import AppTopBar from "@/components/layout/AppTopBar.vue";
 import ToastHost from "@/components/layout/ToastHost.vue";
@@ -15,6 +16,7 @@ import HotkeyHelp from "@/components/layout/HotkeyHelp.vue";
 import BootScreen from "@/components/layout/BootScreen.vue";
 
 const session = useSessionStore();
+const sync = useSyncStore();
 const ui = useUiStore();
 const router = useRouter();
 
@@ -23,6 +25,8 @@ const showApp = computed(() => session.ready && !session.booting);
 onMounted(async () => {
 	session.watchConnectivity();
 	await session.boot();
+	// Anything the last session could not send is drained as soon as we are up.
+	sync.watch();
 });
 
 // A terminal with no open shift cannot sell; send it to the opening form.

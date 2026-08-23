@@ -180,8 +180,12 @@ def save_customer(pos_profile, customer_name, company, customer_id=None, **kwarg
 		doc.customer_name = customer_name
 		doc.posa_referral_company = company
 		for key, value in fields.items():
-			if value is not None:
-				doc.set(key, value)
+			# Blank is "not supplied", not "clear it". A referral code in particular is
+			# the anchor for every coupon already issued against it, so a form that
+			# happens not to include the field must never erase it.
+			if value is None or value == "":
+				continue
+			doc.set(key, value)
 		doc.save()
 
 		if mobile_no is not None and mobile_no != doc.mobile_no:
