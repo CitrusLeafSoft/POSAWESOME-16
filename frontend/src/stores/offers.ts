@@ -121,31 +121,44 @@ export const useOffersStore = defineStore("offers", () => {
 
 	async function applyCoupon(code: string) {
 		if (!code.trim()) return;
-		if (coupons.value.some((coupon) => coupon.coupon_code === code)) {
+		// Codes are matched case-insensitively server-side, so the duplicate check has
+		// to be too — otherwise "save10" after "SAVE10" is added a second time.
+		const typed = code.trim().toUpperCase();
+		if (coupons.value.some((coupon) => (coupon.coupon_code ?? "").toUpperCase() === typed)) {
 			ui.warn("That coupon is already on this sale");
 			return;
 		}
 		try {
+			// check_coupon_code answers { coupon: <POS Coupon doc>, msg }. The offer is a
+			// field on that document, not a sibling of it — reading it as `result.pos_offer`
+			// left every applied coupon with no offer attached, so the coupon reported
+			// success and then unlocked nothing. couponSatisfied() matches on exactly this.
 			const result = (await api.coupon({
-				coupon: code,
+				coupon: typed,
 				customer: cart.customer,
 				company: session.companyName,
-			})) as { msg?: string; coupon?: string; pos_offer?: string } | null;
+			})) as { msg?: string; coupon?: { coupon_code?: string; pos_offer?: string } } | null;
 
-			if (!result?.coupon) {
+			const applied = result?.coupon;
+			if (!applied) {
 				ui.fail("Coupon not valid", result?.msg ?? "That code was not accepted.");
 				return;
 			}
 
+			// The server matches case-insensitively; store what it actually resolved to so
+			// removing the coupon later compares against the same string.
+			const resolvedCode = applied.coupon_code ?? code;
+			const offerName = applied.pos_offer;
+
 			coupons.value = [
 				...coupons.value,
-				{ coupon_code: code, pos_offer: result.pos_offer, applied: 1 },
+				{ coupon_code: resolvedCode, pos_offer: offerName, applied: 1 },
 			];
 			cart.appliedCoupons = coupons.value;
 			// A coupon can unlock a coupon-gated offer, so switch it on immediately.
-			if (result.pos_offer) toggle(result.pos_offer, true);
+			if (offerName) toggle(offerName, true);
 			else refresh();
-			ui.success("Coupon applied", code);
+			ui.success("Coupon applied", resolvedCode);
 		} catch (error) {
 			ui.fail("Coupon not valid", error instanceof Error ? error.message : String(error));
 		}
