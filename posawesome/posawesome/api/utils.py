@@ -8,7 +8,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate
+from frappe.utils import cint, cstr, flt, get_datetime, get_time, getdate, nowdate, nowtime
 
 __all__ = [
 	"as_dict",
@@ -133,6 +133,7 @@ def get_available_batches(item_code, warehouse, posting_date=None):
 			"warehouse": warehouse,
 			"based_on": frappe.get_single_value("Stock Settings", "pick_serial_and_batch_based_on") or "FIFO",
 			"posting_date": posting_date or nowdate(),
+			"posting_time": get_time(nowtime() or "00:00:00"),
 		}
 	)
 

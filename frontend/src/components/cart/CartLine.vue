@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Minus, Plus, Tag, Trash2, Gift, StickyNote } from "lucide-vue-next";
+import { Minus, Plus, Tag, Trash2, Gift, StickyNote, Boxes } from "lucide-vue-next";
 import { formatCurrency, formatFloat, toNumber } from "@/lib/format";
 import { useCartStore } from "@/stores/cart";
 import { useSessionStore } from "@/stores/session";
+import { useUiStore } from "@/stores/ui";
 import type { CartItem } from "@/types";
 
 const props = defineProps<{ line: CartItem }>();
 
 const cart = useCartStore();
 const session = useSessionStore();
+const ui = useUiStore();
 
 const selected = computed(() => cart.selectedRowId === props.line.posa_row_id);
 const bumped = computed(() => cart.bumped.has(props.line.posa_row_id));
@@ -29,6 +31,21 @@ function commitQty(event: Event) {
 	void cart.setQty(props.line.posa_row_id, lineSign.value * typed);
 	editingQty.value = false;
 }
+
+function viewDetails() {
+	cart.selectedRowId = props.line.posa_row_id;
+	ui.openModal("lineDetails", { line: props.line });
+}
+
+function pickSerial() {
+	cart.selectedRowId = props.line.posa_row_id;
+	ui.openModal("serialBatch", { line: props.line });
+}
+
+/** One serial number per sold unit, shown as distinct chips. */
+const serials = computed(() =>
+	(props.line.serial_no ?? "").split("\n").map((s) => s.trim()).filter(Boolean),
+);
 </script>
 
 <template>
@@ -38,7 +55,7 @@ function commitQty(event: Event) {
 			selected ? 'bg-accent-soft/45' : 'hover:bg-surface-2',
 			bumped && 'animate-bump',
 		]"
-		@click="cart.selectedRowId = line.posa_row_id"
+		@click="viewDetails"
 	>
 		<span
 			v-if="selected"
@@ -55,7 +72,17 @@ function commitQty(event: Event) {
 				<div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-subtle">
 					<span class="font-mono">{{ line.item_code }}</span>
 					<span v-if="line.uom !== line.stock_uom" class="rounded bg-surface-3 px-1">{{ line.uom }}</span>
-					<span v-if="line.batch_no" class="rounded bg-surface-3 px-1">{{ line.batch_no }}</span>
+					<span v-if="line.custom_nlc" class="rounded bg-surface-3 px-1" title="NLC">NLC {{ formatCurrency(line.custom_nlc) }}</span>
+					<span v-if="line.custom_rsp" class="rounded bg-surface-3 px-1" title="RSP">RSP {{ formatCurrency(line.custom_rsp) }}</span>
+<span v-if="line.batch_no" class="rounded bg-surface-3 px-1" title="Batch">{{ line.batch_no }}</span>
+					<span v-if="serials.length" class="flex flex-wrap gap-0.5">
+						<span
+							v-for="no in serials"
+							:key="no"
+							class="rounded bg-surface-3 px-1 font-mono"
+							title="Serial"
+						>{{ no }}</span>
+					</span>
 					<span v-if="hasDiscount" class="inline-flex items-center gap-0.5 text-success">
 						<Tag class="size-2.5" />{{ formatFloat(line.discount_percentage, 2) }}%
 					</span>
@@ -64,6 +91,9 @@ function commitQty(event: Event) {
 
 			<div class="shrink-0 text-right">
 				<p class="text-sm font-bold tnum">{{ formatCurrency(line.amount) }}</p>
+				<p class="text-[11px] tnum text-subtle">
+					<span class="text-muted">Sale</span> {{ formatCurrency(line.price_list_rate) }}
+				</p>
 				<p v-if="hasDiscount" class="text-[11px] tnum text-subtle line-through">
 					{{ formatCurrency(line.price_list_rate * line.qty) }}
 				</p>
@@ -111,6 +141,17 @@ function commitQty(event: Event) {
 					<Plus class="size-3.5" />
 				</button>
 			</div>
+
+			<button
+				v-if="line.has_serial_no || line.has_batch_no"
+				type="button"
+				class="inline-flex h-8 items-center gap-1.5 rounded-card border border-line bg-surface px-3 text-xs font-medium text-muted transition hover:text-fg"
+				title="Pick batch / serial numbers"
+				@click.stop="pickSerial"
+			>
+				<Boxes class="size-3.5" />
+				{{ line.has_serial_no ? "Serials" : "Batch" }}
+			</button>
 
 			<label class="flex items-center gap-1.5 text-[11px] text-subtle">
 				Rate

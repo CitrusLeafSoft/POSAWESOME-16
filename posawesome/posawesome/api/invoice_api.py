@@ -16,7 +16,9 @@ from frappe.utils import cint, flt, getdate, nowdate
 from frappe.utils.background_jobs import enqueue
 
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
+from erpnext.accounts.utils import get_account_currency
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
+from erpnext.setup.utils import get_exchange_rate
 
 from posawesome.posawesome.api.utils import (
 	apply_serial_batch_fields,
@@ -45,6 +47,7 @@ def update_invoice(data):
 			frappe.throw(_("Invoice {0} is already submitted").format(doc.name))
 		doc.update(data)
 	else:
+		print(data,"================data")
 		doc = frappe.get_doc(data)
 
 	doc.set_missing_values()
@@ -63,7 +66,10 @@ def update_invoice(data):
 
 	if doc.get("posting_date") and getdate(doc.posting_date) != getdate():
 		doc.set_posting_time = 1
-
+	for i in doc.items:
+		item_doc = frappe.get_doc("Item",i.item_code)
+		i.custom_nlc = item_doc.custom_nlc
+		i.custom_rsp = item_doc.custom_rsp
 	doc.save()
 	return doc
 
@@ -141,6 +147,12 @@ def submit_invoice(invoice, data):
 
 	doc.update(invoice)
 
+	# A "Credit" payment mode is not money taken — drop it from payments so it
+	# stays outstanding on the invoice (and can go through credit approval). The
+	# SPA already does this, but an offline replay or a stray payload must not
+	# book it as a payment.
+	_require_credit_mode(doc)
+
 	if invoice.get("posa_delivery_date"):
 		# A future delivery is fulfilled by the Sales Order, not by this invoice.
 		doc.update_stock = 0
@@ -169,6 +181,15 @@ def submit_invoice(invoice, data):
 	if data.get("due_date"):
 		frappe.db.set_value("Sales Invoice", doc.name, "due_date", data.get("due_date"), update_modified=False)
 
+	# A POS credit sale or a discount-below-NLC sale is NOT submitted yet. It is
+	# parked in the matching workflow state — the on_update hook raises a Workflow
+	# Action for the approver, and the invoice only posts once the approver approves
+	# it. Returns status 0.
+	if _is_pos_credit_sale(doc):
+		return _hold_for_workflow(doc, "Pending Credit Approval", "__credit_pending")
+	if _needs_discount_approval(doc):
+		return _hold_for_workflow(doc, "Pending Discount Approval", "__discount_pending")
+
 	background = cint(
 		frappe.get_cached_value("POS Profile", doc.pos_profile, "posa_allow_submissions_in_background_job")
 	)
@@ -179,6 +200,82 @@ def submit_invoice(invoice, data):
 		settle_customer_credit(doc, data, is_payment_entry, total_cash, cash_account, payments)
 
 	return {"name": doc.name, "status": doc.docstatus, "grand_total": doc.grand_total}
+
+
+def _is_pos_credit_sale(doc):
+	"""True when this is a POS credit sale: flagged and still carrying a balance.
+
+	A tender through a "Credit" mode never lands in ``payments`` (it is stripped
+	below), so ``paid_amount`` stays below the total and the remainder is genuine
+	outstanding that has to be approved.
+	"""
+	return cint(doc.get("custom_is_pos_credit")) and _outstanding(doc) > 0
+
+
+def _require_credit_mode(doc):
+	"""Drop any payment row whose Mode of Payment is "Credit".
+
+	That value is never paid; it stays on the invoice's outstanding balance so the
+	credit-approval workflow can gate it. """
+	for payment in list(doc.payments):
+		if (payment.mode_of_payment or "").lower() == "credit":
+			doc.remove(payment)
+
+
+def _outstanding(doc):
+	return flt(doc.get("grand_total")) - flt(doc.get("paid_amount"))
+
+
+def _needs_discount_approval(doc):
+	"""True when any item is sold below its normal lowest cost (custom_nlc > rate).
+
+	Such a discount needs approval, mirroring the credit-sale gate: the invoice is
+	parked in "Pending Discount Approval" instead of being submitted.
+	"""
+	for item in doc.get("items") or []:
+		if flt(item.get("custom_nlc")) > flt(item.get("rate")):
+			return True
+	return False
+
+
+def docstatus_is_pending_credit(doc):
+	"""True for a draft invoice still waiting on workflow approval.
+
+	Covers both the credit and the discount-below-NLC parking states, so neither
+	is ever auto-submitted by the background job.
+	"""
+	if doc.docstatus != 0:
+		return False
+	if cint(doc.get("custom_is_pos_credit")):
+		return doc.get("workflow_state") == "Pending Credit Approval" or _outstanding(doc) > 0
+	if doc.get("workflow_state") == "Pending Discount Approval":
+		return True
+	return False
+
+
+def _hold_for_workflow(doc, state, pending_flag):
+	"""Send a POS invoice through the approval workflow instead of submitting.
+
+	The active Sales Invoice workflow jumps fully-approved invoices straight to
+	"Approved" on submit, but here we park a *draft* in the given workflow state
+	(e.g. "Pending Credit Approval" / "Pending Discount Approval"). Setting the
+	workflow state directly (rather than a normal save) avoids the workflow
+	permission check that would demand the cashier hold the approver role to
+	transition Draft -> Pending. We then fire the same on_update hook ERPNext uses
+	so it raises a Workflow Action for the approver to approve or reject it.
+	"""
+	from frappe.workflow.doctype.workflow_action.workflow_action import process_workflow_actions
+
+	frappe.db.set_value("Sales Invoice", doc.name, "workflow_state", state, update_modified=False)
+	doc.workflow_state = state
+	parked = frappe.get_doc("Sales Invoice", doc.name)
+	process_workflow_actions(parked, "on_update")
+	return {
+		"name": doc.name,
+		"status": doc.docstatus,
+		"grand_total": doc.grand_total,
+		pending_flag: 1,
+	}
 
 
 def _resolve_cash_account(doc):
@@ -211,11 +308,28 @@ def _create_advance_for_change(doc, data, cash_account):
 			"reference_date": nowdate(),
 		}
 	)
+	_set_exchange_rates(entry, doc.posting_date or nowdate())
 	entry.flags.ignore_permissions = True
 	frappe.flags.ignore_account_permission = True
 	entry.insert()
 	entry.submit()
 	return entry
+
+
+def _set_exchange_rates(entry, posting_date):
+	"""Derive source/target exchange rates for a Payment Entry from the account
+	currencies it touches. Payment Entry's own ``set_exchange_rate`` only fills a
+	rate when it is still empty and otherwise throws "X Exchange Rate is mandatory";
+	we populating both up front means that check always has a non-empty value and the
+	sale can complete with a correctly converted cash/credit leg.
+	"""
+	company_currency = frappe.get_cached_value("Company", entry.company, "default_currency")
+
+	paid_from_currency = get_account_currency(entry.paid_from) or company_currency
+	paid_to_currency = get_account_currency(entry.paid_to) or company_currency
+
+	entry.source_exchange_rate = flt(get_exchange_rate(paid_from_currency, company_currency, posting_date)) or 1
+	entry.target_exchange_rate = flt(get_exchange_rate(paid_to_currency, company_currency, posting_date)) or 1
 
 
 def _attach_advances(doc, data):
@@ -259,6 +373,11 @@ def _enqueue_pending_submissions(doc, data, is_payment_entry, total_cash, cash_a
 		pluck="name",
 	)
 	for name in pending:
+		pending_doc = frappe.get_doc("Sales Invoice", name)
+		# Never auto-submit a credit invoice that is waiting on approval — it must
+		# only post when the approver's Workflow Action submits it.
+		if docstatus_is_pending_credit(pending_doc):
+			continue
 		enqueue(
 			method=submit_in_background_job,
 			queue="short",
@@ -278,7 +397,7 @@ def _enqueue_pending_submissions(doc, data, is_payment_entry, total_cash, cash_a
 def submit_in_background_job(kwargs):
 	invoice = kwargs.get("invoice")
 	doc = frappe.get_doc("Sales Invoice", invoice)
-	if doc.docstatus != 0:
+	if doc.docstatus != 0 or docstatus_is_pending_credit(doc):
 		return
 	doc.submit()
 	settle_customer_credit(
@@ -360,6 +479,9 @@ def _book_cash_legs(doc, data, payments):
 		mode = payment.get("mode_of_payment") if isinstance(payment, dict) else payment.mode_of_payment
 		account = payment.get("account") if isinstance(payment, dict) else payment.account
 
+		# cur_frm.doc.received_amount &&
+        #         cur_frm.doc.paid_to_account_currency != company_currency &&
+        #         cur_frm.doc.paid_from_account_currency != cur_frm.doc.paid_to_account_currency
 		entry = frappe.get_doc(
 			{
 				"doctype": "Payment Entry",
@@ -385,6 +507,7 @@ def _book_cash_legs(doc, data, payments):
 				],
 			}
 		)
+		_set_exchange_rates(entry, doc.posting_date or nowdate())
 		entry.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
 		entry.insert()

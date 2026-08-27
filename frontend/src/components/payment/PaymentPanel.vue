@@ -47,6 +47,8 @@ const canRedeem = computed(
 		toNumber(cart.customerInfo?.loyalty_points) > 0 &&
 		toNumber(cart.customerInfo?.conversion_factor) > 0,
 );
+/** The Mode of Payment treated as credit (its tender stays outstanding). */
+const CREDIT_MODE = "Credit";
 
 // Totals can settle after entry (taxes arriving with the draft save); while the
 // cashier has not touched the amounts, keep tender pinned to what is owed.
@@ -85,7 +87,8 @@ function nextSale() {
 function commitRedemption(event: Event) {
 	const raw = (event.target as HTMLInputElement).value.trim();
 	cart.setLoyaltyRedemption(toNumber(raw));
-	payments.tenderExact();
+	// payments.tenderExact();
+	payments.balanceTender();
 }
 
 /** Open the in-page print dialog; the browser's print sheet stays over this view. */
@@ -176,32 +179,6 @@ function openMpesa() {
 			</header>
 
 			<div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
-				<!-- Modes -->
-				<div class="space-y-2">
-					<div
-						v-for="row in payments.rows"
-						:key="row.mode_of_payment"
-						class="flex items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-xs transition focus-within:border-accent"
-					>
-						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted">
-							<Banknote class="size-4" />
-						</span>
-						<label class="min-w-0 flex-1 truncate text-sm font-medium" :for="`pay-${row.mode_of_payment}`">
-							{{ row.mode_of_payment }}
-						</label>
-						<input
-							:id="`pay-${row.mode_of_payment}`"
-							:value="row.amount ? Math.abs(row.amount) : ''"
-							type="text"
-							inputmode="decimal"
-							placeholder="0.00"
-							class="h-10 w-32 rounded-card border-line bg-surface-2 text-right text-base font-semibold tnum focus:border-accent focus:ring-0"
-							@focus="($event.target as HTMLInputElement).select()"
-							@input="payments.setAmount(row.mode_of_payment, toNumber(($event.target as HTMLInputElement).value))"
-						/>
-					</div>
-				</div>
-
 				<!-- Loyalty redemption — points settle part of the total before cash -->
 				<div
 					v-if="canRedeem"
@@ -227,6 +204,37 @@ function openMpesa() {
 						@focus="($event.target as HTMLInputElement).select()"
 						@change="commitRedemption($event)"
 					/>
+				</div>
+				<!-- Modes -->
+				<div class="space-y-2">
+					<div
+						v-for="row in payments.rows"
+						:key="row.mode_of_payment"
+						class="flex items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-xs transition focus-within:border-accent"
+					>
+						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted">
+							<Banknote class="size-4" />
+						</span>
+						<label class="min-w-0 flex-1 truncate text-sm font-medium" :for="`pay-${row.mode_of_payment}`">
+							{{ row.mode_of_payment }}
+							<span
+								v-if="row.mode_of_payment === CREDIT_MODE"
+								class="ms-1 rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+							>
+								Credit
+							</span>
+						</label>
+						<input
+							:id="`pay-${row.mode_of_payment}`"
+							:value="row.amount ? Math.abs(row.amount) : ''"
+							type="text"
+							inputmode="decimal"
+							placeholder="0.00"
+							class="h-10 w-32 rounded-card border-line bg-surface-2 text-right text-base font-semibold tnum focus:border-accent focus:ring-0"
+							@focus="($event.target as HTMLInputElement).select()"
+							@input="payments.setAmount(row.mode_of_payment, toNumber(($event.target as HTMLInputElement).value))"
+						/>
+					</div>
 				</div>
 
 				<!-- Customer credit — unapplied credit notes and advances on the account -->
@@ -329,11 +337,14 @@ function openMpesa() {
 				</div>
 			</div>
 
-			<!-- Balance + complete -->
 			<footer class="shrink-0 space-y-2 border-t border-line p-3">
 				<div class="flex justify-between text-sm">
 					<span class="text-muted">{{ isReturn ? "Refunded" : "Tendered" }}</span>
 					<span class="font-semibold tnum">{{ formatCurrency(Math.abs(payments.paid)) }}</span>
+				</div>
+				<div v-if="payments.creditTendered > 0 && !isReturn" class="flex justify-between text-sm">
+					<span class="text-warning">On credit</span>
+					<span class="font-semibold tnum text-warning">{{ formatCurrency(payments.creditTendered) }}</span>
 				</div>
 				<div class="flex justify-between text-sm">
 					<span :class="payments.outstanding > 0 ? 'text-danger' : 'text-muted'">

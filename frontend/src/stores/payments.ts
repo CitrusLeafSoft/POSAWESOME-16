@@ -43,7 +43,27 @@ export const usePaymentsStore = defineStore("payments", () => {
 	 *  so every comparison below has to be taken relative to this. */
 	const sign = computed(() => (cart.isReturn ? -1 : 1));
 
-	const paid = computed(() => money(rows.value.reduce((sum, row) => sum + toNumber(row.amount), 0)));
+	/** The Mode of Payment whose tender is treated as credit, not cash taken. */
+	const CREDIT_MODE = "Credit";
+
+	/** A tender row routed to the credit mode is credit — it stays outstanding and
+	 *  is never booked as a payment, so the invoice can go through approval. */
+	function isCreditRow(row: TenderRow): boolean {
+		return row.mode_of_payment === CREDIT_MODE;
+	}
+
+	/** Money actually taken from the customer — credit-mode lines are excluded. */
+	const paid = computed(() =>
+		money(
+			rows.value.filter((row) => !isCreditRow(row)).reduce((sum, row) => sum + toNumber(row.amount), 0),
+		),
+	);
+	/** The value placed on the customer's credit instead of being paid (sales only). */
+	const creditTendered = computed(() =>
+		cart.isReturn ? 0 : money(rows.value.filter(isCreditRow).reduce((sum, row) => sum + toNumber(row.amount), 0)),
+	);
+	/** True once a credit-mode line is on the ticket, so the invoice is a credit sale. */
+	const isPosCredit = computed(() => !cart.isReturn && creditTendered.value > 0);
 	/** Credit the cashier has chosen to spend on this sale. */
 	const creditApplied = computed(() =>
 		cart.isReturn
@@ -71,14 +91,28 @@ export const usePaymentsStore = defineStore("payments", () => {
 	/** Over-tender: change owed to the customer, or an over-refund. */
 	const change = computed(() => money(Math.max(sign.value * (paid.value - payable.value), 0)));
 	const settled = computed(() => sign.value * remaining.value <= 0);
-	const canSubmit = computed(
-		() =>
+	const allowPartialPayment = computed(() => !!session.profile?.posa_allow_partial_payment);
+    const allowCreditSale = computed(() => !!session.profile?.posa_allow_credit_sale);
+
+    /** Nothing is left genuinely unpaid once cash, customer credit and POS credit
+	 *  are all put on the ticket. */
+    const covered = computed(() =>
+		money(sign.value * (payable.value - paid.value - creditTendered.value)) <= 0,
+	);
+
+    const canSubmit = computed(
+        () =>
 			!cart.isEmpty &&
 			!!cart.customer &&
-			Math.abs(paid.value) > 0 &&
-			settled.value &&
-			!submitting.value,
-	);
+			!submitting.value &&
+			(
+				allowCreditSale.value ||
+				// A credit tender covers what cash doesn't — the invoice goes to approval.
+				(creditTendered.value > 0 && covered.value) ||
+				// Cash / bank tender: settled, or the profile tolerates a partial pay.
+				(Math.abs(paid.value) > 0 && (covered.value || allowPartialPayment.value))
+			),
+    );
 
 	function build() {
 		rows.value = session.paymentMethods.map((method: PaymentMethod) => ({
@@ -128,18 +162,21 @@ export const usePaymentsStore = defineStore("payments", () => {
 
 	/** Spend an amount from one credit origin, capped at what it holds. */
 	function setCredit(origin: string, value: number) {
+		console.log("setCredit")
 		const row = credit.value.find((entry) => entry.credit_origin === origin);
 		if (!row) return;
 		const cap = toNumber(row.total_credit);
 		row.credit_to_redeem = money(Math.min(Math.max(toNumber(value), 0), cap));
 		// Credit changes what is left to tender, so any auto-tender has to run again.
 		touched.value = false;
-		clear();
-		tenderExact();
+		// clear();
+		// tenderExact();
+		balanceTender();
 	}
 
 	/** Spend as much credit as the sale can absorb, oldest origin first. */
 	function applyMaxCredit() {
+		console.log("applyMaxCredit")
 		let room = money(Math.max(cart.payableAmount - toNumber(cart.loyaltyAmount), 0));
 		for (const row of credit.value) {
 			const take = money(Math.min(toNumber(row.total_credit), room));
@@ -147,15 +184,19 @@ export const usePaymentsStore = defineStore("payments", () => {
 			room = money(room - take);
 		}
 		touched.value = false;
-		clear();
-		tenderExact();
+		// clear();
+		// tenderExact();
+		balanceTender();
 	}
 
 	function clearCredit() {
+		console.log("clearCredit")
+		console.log(credit,credit.value,"===================credit value")
 		for (const row of credit.value) row.credit_to_redeem = 0;
 		touched.value = false;
-		clear();
-		tenderExact();
+		// clear();
+		// tenderExact();
+		balanceTender();
 	}
 
 	/** The cashier always types a positive magnitude; direction comes from the sale. */
@@ -167,15 +208,28 @@ export const usePaymentsStore = defineStore("payments", () => {
 	}
 
 	function addAmount(mode: string, delta: number) {
+		console.log("addAmount")
 		const row = rows.value.find((entry) => entry.mode_of_payment === mode);
 		if (!row) return;
 		const magnitude = Math.max(Math.abs(row.amount) + Math.abs(delta), 0);
 		row.amount = money(sign.value * magnitude);
 		touched.value = true;
 	}
-
+	function balanceTender() {
+		const target =
+			rows.value.find((row) => row.default) ??
+			rows.value.find((row) => row.amount) ??
+			rows.value[0];
+		if (!target) return;
+		const entered = rows.value
+			.filter((row) => row.mode_of_payment !== target.mode_of_payment)
+			.reduce((sum, row) => sum + toNumber(row.amount), 0);
+		// Signed, not clamped: refunds have to be able to go negative.
+		target.amount = money(payable.value - entered);
+	}
 	/** Drop the whole balance onto one mode — the common single-tender case. */
 	function tenderExact(mode?: string) {
+		console.log("tenderExact")
 		const target =
 			rows.value.find((row) => row.mode_of_payment === mode) ??
 			rows.value.find((row) => row.default) ??
@@ -204,7 +258,9 @@ export const usePaymentsStore = defineStore("payments", () => {
 			payments: rows.value
 				// Magnitude, not sign: refund rows are negative and a `> 0` test
 				// silently drops every one of them, leaving the invoice unpaid.
-				.filter((row) => Math.abs(row.amount) > 0)
+				// Credit-mode lines are also dropped — that value stays outstanding,
+				// it is never booked as a payment.
+				.filter((row) => Math.abs(row.amount) > 0 && !isCreditRow(row))
 				.map((row) => ({
 					mode_of_payment: row.mode_of_payment,
 					amount: row.amount,
@@ -214,6 +270,8 @@ export const usePaymentsStore = defineStore("payments", () => {
 				})),
 			paid_amount: paid.value,
 			change_amount: change.value,
+			// A credit tender turns the invoice into a credit sale that needs approval.
+			custom_is_pos_credit: isPosCredit.value ? 1 : 0,
 		};
 
 		const data: Record<string, unknown> = {
@@ -273,6 +331,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 	}
 
 	async function submit(): Promise<Record<string, unknown> | null> {
+		console.log("submit")
 		if (!canSubmit.value) return null;
 		submitting.value = true;
 		try {
@@ -292,6 +351,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 					return null;
 				}
 				if (!touched.value) {
+					console.log("submit touch")
 					clear();
 					tenderExact();
 				}
@@ -318,8 +378,16 @@ export const usePaymentsStore = defineStore("payments", () => {
 
 			lastInvoice.value = result;
 			ui.success(
-				cart.isReturn ? "Refund complete" : "Sale complete",
-				`${result.name ?? draftName}${change.value ? ` · change ${change.value}` : ""}`,
+				!!result.__credit_pending
+					? "Sale held for credit approval"
+					: !!result.__discount_pending
+						? "Sale held for discount approval"
+						: cart.isReturn
+							? "Refund complete"
+							: "Sale complete",
+				!!result.__credit_pending || !!result.__discount_pending
+					? `${result.name ?? draftName} · awaiting approval`
+					: `${result.name ?? draftName}${change.value ? ` · change ${change.value}` : ""}`,
 			);
 			return result;
 		} catch (error) {
@@ -342,6 +410,8 @@ export const usePaymentsStore = defineStore("payments", () => {
 		lastInvoice,
 		sign,
 		paid,
+		creditTendered,
+		isPosCredit,
 		redeemed,
 		creditApplied,
 		creditAvailable,
@@ -360,6 +430,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 		setAmount,
 		addAmount,
 		tenderExact,
+		balanceTender,
 		clear,
 		submit,
 	};

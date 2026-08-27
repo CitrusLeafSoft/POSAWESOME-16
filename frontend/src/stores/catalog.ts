@@ -43,7 +43,16 @@ export const useCatalogStore = defineStore("catalog", () => {
 		for (const item of list) {
 			index.set(
 				item.item_code,
-				[item.item_code, item.item_name, item.item_group, item.brand, ...(item.item_barcode ?? []).map((b) => b.barcode)]
+				// [item.item_code, item.item_name, item.item_group, item.brand, ...(item.item_barcode ?? []).map((b) => b.barcode)]
+				[
+					item.item_code,
+					item.item_name,
+					item.item_group,
+					item.brand,
+					...(item.item_barcode ?? []).map((b) => b.barcode),
+					...(item.serial_no_data ?? []).map((s) => s.serial_no),
+					...(item.batch_no_data ?? []).map((b) => b.batch_no),
+				]
 					.filter(Boolean)
 					.join(" ")
 					.toLowerCase(),

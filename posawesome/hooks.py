@@ -17,6 +17,10 @@ doctype_js = {
 	"Company": "posawesome/api/company.js",
 }
 
+override_doctype_class = {
+	"Sales Invoice": "posawesome.posawesome.overrides.sales_invoice.PosaSalesInvoice",
+}
+
 # ------------------------------------------------------------------------------
 # Website
 # ------------------------------------------------------------------------------
@@ -33,6 +37,7 @@ website_route_rules = [
 after_install = "posawesome.install.after_install"
 after_migrate = "posawesome.install.after_migrate"
 after_uninstall = "posawesome.uninstall.after_uninstall"
+after_build = "posawesome.build.build_frontend"
 
 # ------------------------------------------------------------------------------
 # Document events
