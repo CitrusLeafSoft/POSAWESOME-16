@@ -100,6 +100,8 @@ def _get_items(profile, price_list, item_group, search_value, customer, limit):
 			item.has_serial_no,
 			item.max_discount,
 			item.brand,
+			item.custom_nlc,
+			item.custom_rsp
 		)
 		.where(item.disabled == 0)
 		.where(item.is_sales_item == 1)
@@ -392,13 +394,14 @@ def search_serial_or_batch_or_barcode_number(search_value, search_serial_no=0):
 	"""Resolve a scanned string to an item, trying barcode then serial then batch."""
 	if not search_value:
 		return {}
-
+	print(search_value, search_serial_no,"===========search_value, search_serial_no")
 	barcode = frappe.db.get_value(
 		"Item Barcode",
 		{"barcode": search_value},
 		["barcode", "parent as item_code", "posa_uom"],
 		as_dict=True,
 	)
+	print(barcode,"barcode")
 	if barcode:
 		return barcode
 
@@ -406,10 +409,12 @@ def search_serial_or_batch_or_barcode_number(search_value, search_serial_no=0):
 		serial = frappe.db.get_value(
 			"Serial No", search_value, ["name as serial_no", "item_code"], as_dict=True
 		)
+		print(serial,"=========serial")
 		if serial:
 			return serial
 
 	batch = frappe.db.get_value("Batch", search_value, ["name as batch_no", "item as item_code"], as_dict=True)
+	print("batch",batch)
 	if batch:
 		return batch
 

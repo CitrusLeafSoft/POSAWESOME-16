@@ -136,6 +136,8 @@ export interface Item {
 	serial_no_data?: SerialInfo[];
 	attributes?: ItemAttribute[] | "";
 	item_attributes?: { attribute: string; attribute_value: string }[] | "";
+	custom_nlc?: number;
+	custom_rsp?: number;
 }
 
 export interface ItemAttribute {
@@ -196,6 +198,9 @@ export interface CartItem {
 	so_detail?: string | null;
 	/** Present only on return lines — the row being returned against. */
 	sales_invoice_item?: string | null;
+
+	custom_nlc?: number;
+	custom_rsp?: number;
 }
 
 export interface Customer {

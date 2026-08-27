@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { applyLineDiscount, calculateTotals, lineAmount, type TaxRow } from "@/lib/totals";
 import { money, qty as roundQty, today, toNumber } from "@/lib/format";
 import { uid } from "@/lib/uid";
-import type { AppliedOffer, CartItem, Coupon, CustomerInfo, Item } from "@/types";
+import type { AppliedOffer, BatchInfo, CartItem, Coupon, CustomerInfo, Item, SerialInfo } from "@/types";
 import { useSessionStore } from "./session";
 import { useUiStore } from "./ui";
 
@@ -37,6 +37,7 @@ export const useCartStore = defineStore("cart", () => {
 	const dueDate = ref<string | null>(null);
 	const deliveryDate = ref<string | null>(null);
 	const poNumber = ref<string>("");
+	const warrantyNumber = ref<string>("");
 	const notes = ref<string>("");
 	const shippingAddress = ref<string | null>(null);
 	const deliveryCharges = ref<string | null>(null);
@@ -147,6 +148,8 @@ export const useCartStore = defineStore("cart", () => {
 			posa_notes: "",
 			posa_is_offer: 0,
 			posa_offer_applied: 0,
+			custom_nlc: item.custom_nlc,
+			custom_rsp: item.custom_rsp,
 			...overrides,
 		};
 		line.amount = lineAmount(line);
@@ -155,12 +158,122 @@ export const useCartStore = defineStore("cart", () => {
 
 	/* ------------------------------------------------------------- mutation */
 
+	/** The unique serial numbers currently on a line, one per sold unit. */
+	function serialList(line: CartItem): string[] {
+		return (line.serial_no ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+	}
+
+	/** Available serials for this line, restricted to the line's batch when one is set. */
+	function availableSerials(line: CartItem): SerialInfo[] {
+		const rows = line.serial_no_data ?? [];
+		if (!line.batch_no) return rows;
+		return rows.filter((s) => !s.batch_no || s.batch_no === line.batch_no);
+	}
+
+	/** Everything on this line: batches when batched, serials when serialised. */
+	function serialBatchOptions(line: CartItem): {
+		batches: BatchInfo[];
+		serials: SerialInfo[];
+	} {
+		return {
+			batches: line.batch_no_data ?? [],
+			serials: availableSerials(line),
+		};
+	}
+
+	/** Serial numbers already reserved by any other line in the cart, so a repeat
+	 *  scan never double-books the same physical number across two lines. */
+	function serialsUsedElsewhere(line: CartItem): string[] {
+		return items.value.flatMap((other) =>
+			other.posa_row_id === line.posa_row_id ? [] : serialList(other),
+		);
+	}
+
+	/** Ensure the line carries exactly `count` serial numbers, extending from stock
+	 *  or trimming as needed. Returns false when a serialised item cannot be covered. */
+	function commitSerials(line: CartItem, count: number): boolean {
+		const have = serialList(line).length;
+		if (count === have) return true;
+
+		const chosen = new Set(serialList(line));
+		if (count > have) {
+			// Bolt on more serials from the same batch until we reach `count`.
+			const alreadyUsed = new Set(serialsUsedElsewhere(line));
+			const more = availableSerials(line)
+				.map((s) => s.serial_no)
+				.filter((no) => !chosen.has(no) && !alreadyUsed.has(no));
+			if (more.length < count - have) return false;
+			more.slice(0, count - have).forEach((no) => chosen.add(no));
+		} else {
+			// Trim extras — keep the earliest-chosen ones.
+			const kept = Array.from(chosen).slice(0, count);
+			chosen.clear();
+			kept.forEach((no) => chosen.add(no));
+		}
+		if (chosen.size !== count) return false;
+
+		line.serial_no = Array.from(chosen).join("\n");
+		return true;
+	}
+
+	/** A serialised item sells unique numbers on a one-to-one basis with quantity;
+	 *  a batched (non-serialised) line just takes its first available batch. */
+	function autoAssignSerialItem(line: CartItem, item: Item) {
+		if (line.has_batch_no && !line.batch_no) {
+			const batches = line.batch_no_data?.length ? line.batch_no_data : item.batch_no_data ?? [];
+			// Prefer a batch that still has serials left once we've excluded ones
+			// already reserved elsewhere in the cart. Falls back to the first batch.
+			const pool = availableSerials(line);
+			const taken = new Set(serialsUsedElsewhere(line));
+			const fresh = pool.filter((s) => !taken.has(s.serial_no));
+			const batch =
+				fresh.length > 0
+					? batches.find((b) => b.batch_no === fresh[0].batch_no)
+					: batches[0];
+			if (batch) {
+				line.batch_no = batch.batch_no;
+				line.use_serial_batch_fields = 1;
+				// A batch-priced item overrides the price list.
+				if (batch.batch_price) {
+					line.price_list_rate = money(batch.batch_price);
+					line.rate = line.price_list_rate;
+					line.discount_percentage = 0;
+					line.discount_amount = 0;
+					line.amount = lineAmount(line);
+				}
+			}
+		}
+
+		const qty = Math.max(1, Math.abs(line.qty));
+		if (line.has_serial_no) {
+			commitSerials(line, qty);
+		}
+		if (line.serial_no || line.batch_no) line.use_serial_batch_fields = 1;
+	}
+
+	/** Serial rows for a line, excluding ones already reserved elsewhere. When a
+	 *  batch is given it filters to that batch — used by the batch/serial picker so
+	 *  switching batch reveals that batch's serials, not the line's old batch. */
+	function availableSerialsFor(line: CartItem, batch?: string | null): SerialInfo[] {
+		const taken = new Set(serialsUsedElsewhere(line));
+		const pool = batch
+			? (line.serial_no_data ?? []).filter(
+					(s) => !s.batch_no || s.batch_no === batch,
+				)
+			: availableSerials(line);
+		return pool.filter((s) => !taken.has(s.serial_no));
+	}
+
 	async function addItem(item: Item, options: { qty?: number; uom?: string; batchNo?: string } = {}) {
 		if (isReturn.value) {
 			ui.warn("Return in progress", "Finish or cancel the return before adding new items.");
 			return;
 		}
-
+		console.log(item,"------------------->>>>>>>>>")
+		if ((item.custom_nlc==0 || item.custom_rsp ==0) && item.is_stock_item==1){
+			ui.warn("Please update NLC and RSP values in the Item Master before proceeding.",10000);
+			
+		}
 		const uom = options.uom ?? item.stock_uom;
 		const quantity = toNumber(options.qty) || 1;
 
@@ -191,6 +304,7 @@ export const useCartStore = defineStore("cart", () => {
 				line.amount = lineAmount(line);
 			}
 		}
+		autoAssignSerialItem(line, item);
 
 		applyCustomerDiscount(line);
 
@@ -253,6 +367,7 @@ export const useCartStore = defineStore("cart", () => {
 			target.serial_no_data =
 				(detail.serial_no_data as CartItem["serial_no_data"]) ?? target.serial_no_data;
 			if (detail.actual_qty !== undefined) target.actual_qty = toNumber(detail.actual_qty);
+			if (!target.serial_no || !target.batch_no) autoAssignSerialItem(target, target as unknown as Item);
 		} catch {
 			// A failed detail fetch is not fatal — the server fills the gaps on save.
 		}
@@ -273,6 +388,20 @@ export const useCartStore = defineStore("cart", () => {
 
 		if (!validateStock(line, next)) return;
 		if (!validateReturnQty(line, next)) return;
+
+		// A serialised item needs exactly as many unique serials as quantity.
+		if (line.has_serial_no) {
+			const desired = Math.abs(next);
+			const available = availableSerials(line).length;
+			if (desired > available) {
+				ui.warn(
+					`Only ${available} serial number${available === 1 ? "" : "s"} available for ${line.item_code}`,
+					"Pick enough serial numbers for the quantity wanted.",
+				);
+				return;
+			}
+			if (!commitSerials(line, desired)) return;
+		}
 
 		line.qty = next;
 		line.amount = lineAmount(line);
@@ -366,33 +495,47 @@ export const useCartStore = defineStore("cart", () => {
 		markDirty();
 	}
 
-	function setSerialBatch(rowId: string, payload: { batch_no?: string | null; serial_no?: string | null }) {
+	function setSerialBatch(rowId: string, payload: { batch_no?: string | null; serials?: string[] }) {
 		const line = items.value.find((item) => item.posa_row_id === rowId);
 		if (!line) return;
+
 		if (payload.batch_no !== undefined) {
-			line.batch_no = payload.batch_no;
-			// A batch-priced item re-prices when its batch is picked, matching the
-			// price override applied when the batch arrived from a scan.
-			if (payload.batch_no) {
-				const batch = line.batch_no_data?.find((entry) => entry.batch_no === payload.batch_no);
-				if (batch?.batch_price) {
-					line.price_list_rate = money(batch.batch_price);
-					line.rate = line.price_list_rate;
-					line.discount_percentage = 0;
-					line.discount_amount = 0;
-					line.amount = lineAmount(line);
+			if (line.batch_no !== payload.batch_no) {
+				// Changing the batch resets the reserved serials; they are re-picked below.
+				line.batch_no = payload.batch_no;
+				line.serial_no = null;
+				// A batch-priced item re-prices when its batch is picked.
+				if (payload.batch_no) {
+					const batch = line.batch_no_data?.find((entry) => entry.batch_no === payload.batch_no);
+					if (batch?.batch_price) {
+						line.price_list_rate = money(batch.batch_price);
+						line.rate = line.price_list_rate;
+						line.discount_percentage = 0;
+						line.discount_amount = 0;
+						line.amount = lineAmount(line);
+					}
 				}
 			}
 		}
-		if (payload.serial_no !== undefined) {
-			line.serial_no = payload.serial_no;
-			// Serialised items are sold one unit per number.
-			const count = payload.serial_no ? payload.serial_no.split("\n").filter(Boolean).length : 0;
+
+		// Serialised items: the user's explicit serial selection wins. Quantity can
+		// never exceed it, so it is tightened to match, never stretched.
+		if (line.has_serial_no && payload.serials !== undefined) {
+			const valid = payload.serials.filter((no) =>
+				availableSerials(line).some((s) => s.serial_no === no),
+			);
+			line.serial_no = [...new Set(valid)].join("\n");
+			const count = line.serial_no ? line.serial_no.split("\n").filter(Boolean).length : 0;
 			if (count) line.qty = isReturn.value ? -count : count;
-			line.amount = lineAmount(line);
+			else line.qty = 0;
+		} else if (line.has_serial_no) {
+			// Batch changed with no explicit serials — fill straight from stock.
+			commitSerials(line, Math.max(1, Math.abs(line.qty)));
 		}
-		// v16: these two fields only reach the ledger when the flag is set.
-		line.use_serial_batch_fields = 1;
+
+		// v16: these fields only reach the ledger when the flag is set.
+		line.use_serial_batch_fields = line.serial_no || line.batch_no ? 1 : 0;
+		line.amount = lineAmount(line);
 		markDirty();
 	}
 
@@ -486,6 +629,7 @@ export const useCartStore = defineStore("cart", () => {
 			taxes_and_charges: profile?.taxes_and_charges,
 			tc_name: profile?.tc_name,
 			po_no: poNumber.value || undefined,
+			custom_warranty_number: warrantyNumber.value || undefined,
 			posa_notes: notes.value || undefined,
 			posa_delivery_date: deliveryDate.value ?? undefined,
 			shipping_address_name: shippingAddress.value ?? undefined,
@@ -598,6 +742,7 @@ export const useCartStore = defineStore("cart", () => {
 		selectedRowId.value = null;
 		notes.value = "";
 		poNumber.value = "";
+		warrantyNumber.value = "";
 		dueDate.value = null;
 		deliveryDate.value = null;
 		shippingAddress.value = null;
@@ -628,6 +773,7 @@ export const useCartStore = defineStore("cart", () => {
 		customer.value = (doc.customer as string) ?? "";
 		notes.value = (doc.posa_notes as string) ?? "";
 		poNumber.value = (doc.po_no as string) ?? "";
+		warrantyNumber.value = (doc.custom_warranty_number as string) ?? "";
 		postingDate.value = (doc.posting_date as string) ?? today();
 		additionalDiscount.value = toNumber(doc.discount_amount);
 		additionalDiscountPercentage.value = toNumber(doc.additional_discount_percentage);
@@ -739,6 +885,7 @@ export const useCartStore = defineStore("cart", () => {
 		dueDate,
 		deliveryDate,
 		poNumber,
+		warrantyNumber,
 		notes,
 		shippingAddress,
 		deliveryCharges,
@@ -775,6 +922,8 @@ export const useCartStore = defineStore("cart", () => {
 		setLineDiscount,
 		setUom,
 		setSerialBatch,
+		serialBatchOptions,
+		availableSerialsFor,
 		setNotes,
 		removeItem,
 		setAdditionalDiscount,

@@ -41,7 +41,22 @@ export const useUiStore = defineStore("ui", () => {
 	}
 
 	const success = (title: string, detail?: string) => notify({ title, detail, tone: "success" });
-	const warn = (title: string, detail?: string) => notify({ title, detail, tone: "warning" });
+	// const warn = (title: string, detail?: string,duration?: number) => notify({ title, detail,duration,tone: "warning" });
+	const warn = (
+			title: string,
+			detailOrDuration?: string | number,
+			duration?: number
+		) => {
+			const detail = typeof detailOrDuration === "string" ? detailOrDuration : undefined;
+			const finalDuration = typeof detailOrDuration === "number" ? detailOrDuration : duration;
+
+			return notify({
+				title,
+				detail,
+				tone: "warning",
+				duration: finalDuration,
+			});
+		};
 	const fail = (title: string, detail?: string) => notify({ title, detail, tone: "danger" });
 
 	function dismiss(id: string) {
