@@ -39,13 +39,13 @@ def _resolve_opening_shift(value) -> dict:
 
 
 @frappe.whitelist()
-def make_closing_shift_from_opening(opening_shift):
+def make_closing_shift_from_opening(opening_shift, draft_invoices_with_cancellation_reason=None):
 	"""Build — but do not save — the closing shift for an open shift."""
 	payload = _resolve_opening_shift(opening_shift)
 	if not payload.get("name"):
 		frappe.throw(_("An opening shift is required to build a closing shift."))
 	validate_shift_access(payload["name"])
-	return _build_closing_shift(json.dumps(payload, default=str))
+	return _build_closing_shift(json.dumps(payload, default=str), draft_invoices_with_cancellation_reason)
 
 
 @frappe.whitelist()

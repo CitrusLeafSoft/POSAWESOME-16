@@ -76,6 +76,20 @@ frappe.ui.form.on('POS Closing Shift', {
 				set_html_data(frm);
 			}
 		});
+	},
+
+	cancel_shift (frm) {
+		if (!frm.doc.custom_pos_reason_for_cancellation) {
+			frappe.throw(_("Please enter Reason For Cancellation before closing."));
+			return;
+		}
+		
+		frappe.confirm(
+			_("Are you sure you want to close the shift?"),
+			() => {
+				frm.submit();
+			}
+		);
 	}
 });
 

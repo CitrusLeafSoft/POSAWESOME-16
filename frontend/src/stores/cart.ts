@@ -366,6 +366,8 @@ export const useCartStore = defineStore("cart", () => {
 			target.batch_no_data = (detail.batch_no_data as CartItem["batch_no_data"]) ?? target.batch_no_data;
 			target.serial_no_data =
 				(detail.serial_no_data as CartItem["serial_no_data"]) ?? target.serial_no_data;
+			if (detail.has_batch_no !== undefined) target.has_batch_no = detail.has_batch_no as 0 | 1;
+			if (detail.has_serial_no !== undefined) target.has_serial_no = detail.has_serial_no as 0 | 1;
 			if (detail.actual_qty !== undefined) target.actual_qty = toNumber(detail.actual_qty);
 			if (!target.serial_no || !target.batch_no) autoAssignSerialItem(target, target as unknown as Item);
 		} catch {
@@ -818,6 +820,9 @@ export const useCartStore = defineStore("cart", () => {
 				posa_notes: (row.posa_notes as string) ?? "",
 				posa_is_offer: (row.posa_is_offer as 0 | 1) ?? 0,
 				posa_offer_applied: (row.posa_offer_applied as 0 | 1) ?? 0,
+				max_discount: row.max_discount as number | undefined,
+				custom_nlc: row.custom_nlc as number | undefined,
+				custom_rsp: row.custom_rsp as number | undefined,
 				sales_invoice_item: options.asReturn ? (row.name as string) : null,
 			};
 			return line;
@@ -830,6 +835,15 @@ export const useCartStore = defineStore("cart", () => {
 		}
 
 		selectedRowId.value = items.value[0]?.posa_row_id ?? null;
+
+		// A held draft's line only carries what the invoice stored (batch/serial
+		// numbers, NLC/RSP). Live data — available batches, serials, flags from the
+		// Item master — has to be refetched, exactly as a fresh add does. Returns
+		// keep the serials of the source invoice and must not be re-assigned.
+		if (!options.asReturn) {
+			for (const line of items.value) void hydrateLine(line);
+		}
+
 		markDirty();
 	}
 

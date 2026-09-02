@@ -202,8 +202,13 @@ export const api = {
 	checkOpeningShift: (user: string) => call<unknown>(`${NS}.shift.check_opening_shift`, { user }),
 	createOpeningVoucher: (payload: { pos_profile: string; company: string; balance_details: unknown }) =>
 		call<unknown>(`${NS}.shift.create_opening_voucher`, payload),
-	closingShiftFromOpening: (opening_shift: string) =>
-		call<unknown>(`${NS}.shift.make_closing_shift_from_opening`, { opening_shift }),
+	closingShiftFromOpening: (opening_shift: string, draft_invoices_with_cancellation_reason: string | null) =>
+   		call<unknown>(`${NS}.shift.make_closing_shift_from_opening`, { opening_shift, draft_invoices_with_cancellation_reason }),
+	/* Draft Invoices */
+	draftInvoices: (pos_opening_shift: string) =>
+		call<unknown>(`${NS}.invoice_api.get_draft_invoices`, { pos_opening_shift }),
+	draftInvoicesWithState: (pos_opening_shift: string) =>
+		call<unknown>(`${NS}.invoice_api.get_draft_invoices_with_state`, { pos_opening_shift }),
 	submitClosingShift: (closing_shift: unknown) =>
 		call<unknown>(`${NS}.shift.submit_closing_shift`, { closing_shift }),
 	shiftAnalytics: (opening_shift: string) =>
@@ -236,8 +241,12 @@ export const api = {
 	submitInvoice: (invoice: unknown, data: unknown) =>
 		call<unknown>(`${NS}.invoice_api.submit_invoice`, { invoice, data }),
 	deleteInvoice: (invoice: string) => call<unknown>(`${NS}.invoice_api.delete_invoice`, { invoice }),
-	draftInvoices: (pos_opening_shift: string) =>
-		call<unknown>(`${NS}.invoice_api.get_draft_invoices`, { pos_opening_shift }),
+	reasonForCancellation: () =>
+		call<unknown>(`${NS}.invoice_api.get_all_reasons_for_cancellation`),
+	shiftDraftInvoices: (pos_opening_shift: string) =>
+		call<unknown>(`${NS}.invoice_api.get_shift_draft_invoices`, { pos_opening_shift }),
+	shiftInvoices: (pos_opening_shift: string) =>
+		call<unknown>(`${NS}.invoice_api.get_shift_invoices`, { pos_opening_shift }),
 	searchInvoicesForReturn: (invoice_name: string, company: string) =>
 		call<unknown>(`${NS}.invoice_api.search_invoices_for_return`, { invoice_name, company }),
 	searchOrders: (payload: Record<string, unknown>) => call<unknown>(`${NS}.invoice_api.search_orders`, payload),

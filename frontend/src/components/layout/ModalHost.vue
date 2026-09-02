@@ -48,6 +48,7 @@ const registry: Record<string, Component> = {
 	drafts: lazy(() => import("@/components/pos/DraftsModal.vue")),
 	returns: lazy(() => import("@/components/pos/ReturnsModal.vue")),
 	orders: lazy(() => import("@/components/pos/SalesOrdersModal.vue")),
+	shiftInvoices: lazy(() => import("@/components/pos/ShiftInvoicesModal.vue")),
 	variants: lazy(() => import("@/components/pos/VariantsModal.vue")),
 	customer: lazy(() => import("@/components/customer/CustomerFormModal.vue")),
 	invoiceDetails: lazy(() => import("@/components/cart/InvoiceDetailsModal.vue")),

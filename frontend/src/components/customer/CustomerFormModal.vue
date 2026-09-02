@@ -17,6 +17,7 @@ const form = ref({
 	mobile_no: "",
 	email_id: "",
 	tax_id: "",
+	gstin: "",
 	gender: "",
 	customer_type: "Individual",
 	birthday: "",
@@ -39,6 +40,7 @@ onMounted(async () => {
 		mobile_no: info.mobile_no ?? "",
 		email_id: info.email_id ?? "",
 		tax_id: info.tax_id ?? "",
+		gstin: info.gstin ?? "",
 		gender: info.gender ?? "",
 		customer_type: info.customer_type ?? "Individual",
 		birthday: info.birthday ?? "",
@@ -70,8 +72,13 @@ async function save() {
 		// An empty referral code is omitted rather than sent blank: save_customer
 		// writes through any value that is not None, so posting "" on an edit would
 		// wipe a code the customer was already referred in on.
-		const { referral_code, ...rest } = form.value;
-		const payload: Record<string, unknown> = { ...rest, customer_id: props.customerId };
+		const { referral_code, gstin, ...rest } = form.value;
+		const payload: Record<string, unknown> = {
+			...rest,
+			customer_id: props.customerId,
+			// GSTIN is always sent — even blank — so the server can clear it too.
+			gstin: gstin.trim().toUpperCase(),
+		};
 		if (referral_code.trim()) payload.referral_code = referral_code.trim().toUpperCase();
 
 		const result = await customers.save(payload);
@@ -126,6 +133,16 @@ async function save() {
 					v-model="form.tax_id"
 					type="text"
 					class="h-10 w-full rounded-card border-line bg-surface text-sm focus:border-accent focus:ring-0"
+				/>
+			</label>
+			<label class="block">
+				<span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-subtle">GSTIN</span>
+				<input
+					v-model="form.gstin"
+					type="text"
+					autocapitalize="characters"
+					placeholder="Optional"
+					class="h-10 w-full rounded-card border-line bg-surface text-sm font-mono uppercase focus:border-accent focus:ring-0"
 				/>
 			</label>
 			<label class="block">

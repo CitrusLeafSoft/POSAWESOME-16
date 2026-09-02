@@ -24,7 +24,7 @@ export const useCustomerStore = defineStore("customers", () => {
 		for (const customer of list) {
 			map.set(
 				customer.name,
-				[customer.name, customer.customer_name, customer.mobile_no, customer.tax_id, customer.email_id]
+				[customer.name, customer.customer_name, customer.mobile_no, customer.tax_id, customer.gstin, customer.email_id]
 					.filter(Boolean)
 					.join(" ")
 					.toLowerCase(),
@@ -75,6 +75,7 @@ export const useCustomerStore = defineStore("customers", () => {
 						mobile_no: cached.mobile_no ?? undefined,
 						email_id: cached.email_id ?? undefined,
 						tax_id: cached.tax_id ?? undefined,
+						gstin: cached.gstin ?? undefined,
 					}
 				: null;
 		}
