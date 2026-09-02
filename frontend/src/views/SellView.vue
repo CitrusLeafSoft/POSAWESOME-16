@@ -94,6 +94,12 @@ const stop = registerHotkeys([
 		handler: () => ui.openModal("returns"),
 	},
 	{
+		combo: "shift+F6",
+		label: "Invoices on this shift",
+		group: "Sale",
+		handler: () => ui.openModal("shiftInvoices"),
+	},
+	{
 		combo: "Escape",
 		label: "Back to items",
 		group: "Sale",

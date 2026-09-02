@@ -209,6 +209,7 @@ export interface Customer {
 	mobile_no?: string | null;
 	email_id?: string | null;
 	tax_id?: string | null;
+	gstin?: string | null;
 	primary_address?: string | null;
 }
 
@@ -229,6 +230,7 @@ export interface CustomerInfo {
 	birthday?: string;
 	gender?: string;
 	tax_id?: string;
+	gstin?: string;
 	posa_discount?: number;
 	/** Auto-created on insert when the company enables referrals. */
 	posa_referral_code?: string;
@@ -348,4 +350,24 @@ export interface ShiftAnalytics {
 	top_items: { item_code: string; item_name: string; qty: number; amount: number }[];
 	hourly: { hour: number; amount: number; count: number }[];
 	currency: string;
+}
+
+
+export interface DraftShiftInvoice {
+	name: string;
+	customer?: string;
+	customer_name?: string;
+	grand_total?: number;
+	docstatus?: number;
+	status?: string;
+	workflow_state?: string;
+	is_return?: 0 | 1;
+	posa_is_printed?: 0 | 1;
+	posting_date?: string;
+	posting_time?: string;
+	modified?: string;
+}
+
+export interface ReasonForCancellation {
+	reason: string;
 }

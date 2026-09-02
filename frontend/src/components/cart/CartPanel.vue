@@ -126,6 +126,14 @@ async function hold() {
 					<FileClock class="size-3.5" /> Held <kbd class="font-mono text-[10px] text-subtle">F3</kbd>
 				</button>
 				<button
+					type="button"
+					class="inline-flex shrink-0 items-center gap-1.5 rounded-card px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
+					@click="ui.openModal('shiftInvoices')"
+				>
+					<ClipboardList class="size-3.5" /> Invoices
+					<kbd class="font-mono text-[10px] text-subtle">⇧F6</kbd>
+				</button>
+				<button
 					v-if="session.profile?.posa_allow_return"
 					type="button"
 					class="inline-flex shrink-0 items-center gap-1.5 rounded-card px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-fg"

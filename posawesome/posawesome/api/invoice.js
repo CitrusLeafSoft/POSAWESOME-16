@@ -121,7 +121,7 @@ function augment_pos_credit_workflow_status(frm) {
 
     var state = frm.doc.workflow_state || "";
 
-    if (state && frm.doc.custom_is_pos_credit) {
+    if (state && ( frm.doc.docstatus == 2 || frm.doc.custom_is_pos_credit)) {
         frm.page.set_indicator(__(state), pos_credit_workflow_colour(state));
         var doc_label = pos_credit_doc_status_label(frm);
         if (doc_label) {

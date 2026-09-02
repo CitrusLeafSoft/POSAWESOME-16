@@ -160,7 +160,7 @@ export async function cacheCustomers(profile: string, customers: Customer[]): Pr
 			...customer,
 			key: `${profile}::${customer.name}`,
 			profile,
-			search: [customer.name, customer.customer_name, customer.mobile_no, customer.tax_id, customer.email_id]
+			search: [customer.name, customer.customer_name, customer.mobile_no, customer.tax_id, customer.gstin, customer.email_id]
 				.filter(Boolean)
 				.join(" ")
 				.toLowerCase(),

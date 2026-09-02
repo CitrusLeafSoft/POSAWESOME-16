@@ -180,13 +180,13 @@
    "print_hide": 1,
    "read_only": 1
   },
-  {
-   "fieldname": "pos_opening_shift",
-   "fieldtype": "Link",
-   "label": "POS Opening Shift",
-   "options": "POS Opening Shift",
-   "reqd": 1
-  },
+{
+    "fieldname": "pos_opening_shift",
+    "fieldtype": "Link",
+    "label": "POS Opening Shift",
+    "options": "POS Opening Shift",
+    "reqd": 1
+   },
   {
    "fieldname": "pos_payments",
    "fieldtype": "Table",

@@ -104,6 +104,7 @@ def get_customer_names(pos_profile, search=None):
 			"customer_name": ["like", pattern],
 			"mobile_no": ["like", pattern],
 			"tax_id": ["like", pattern],
+			"gstin": ["like", pattern],
 			"email_id": ["like", pattern],
 		}
 
@@ -111,7 +112,7 @@ def get_customer_names(pos_profile, search=None):
 		"Customer",
 		filters=filters,
 		or_filters=or_filters,
-		fields=["name", "customer_name", "mobile_no", "email_id", "tax_id", "primary_address"],
+		fields=["name", "customer_name", "mobile_no", "email_id", "tax_id", "gstin", "primary_address"],
 		order_by="customer_name asc",
 		limit_page_length=0 if not search else 100,
 	)
@@ -138,6 +139,7 @@ def get_customer_info(customer):
 		"birthday": doc.get("posa_birthday"),
 		"gender": doc.gender,
 		"tax_id": doc.tax_id,
+		"gstin": doc.get("gstin"),
 		"posa_discount": doc.get("posa_discount"),
 		"posa_referral_code": doc.get("posa_referral_code"),
 		"customer_group_price_list": frappe.db.get_value(
@@ -174,6 +176,7 @@ def save_customer(pos_profile, customer_name, company, customer_id=None, **kwarg
 	}
 	mobile_no = kwargs.get("mobile_no")
 	email_id = kwargs.get("email_id")
+	gstin = kwargs.get("gstin")
 
 	if customer_id:
 		doc = frappe.get_doc("Customer", customer_id)
@@ -186,6 +189,9 @@ def save_customer(pos_profile, customer_name, company, customer_id=None, **kwarg
 			if value is None or value == "":
 				continue
 			doc.set(key, value)
+		# GSTIN is always sent by the form, so an empty value here means "clear it".
+		if gstin is not None and gstin != doc.gstin:
+			doc.set("gstin", gstin)
 		doc.save()
 
 		if mobile_no is not None and mobile_no != doc.mobile_no:
@@ -206,6 +212,7 @@ def save_customer(pos_profile, customer_name, company, customer_id=None, **kwarg
 			"posa_referral_company": company,
 			"mobile_no": mobile_no,
 			"email_id": email_id,
+			"gstin": gstin,
 			**fields,
 		}
 	)

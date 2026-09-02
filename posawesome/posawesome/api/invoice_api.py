@@ -544,6 +544,64 @@ def get_draft_invoices(pos_opening_shift):
 	return [frappe.get_doc("Sales Invoice", name).as_dict() for name in names]
 
 
+@frappe.whitelist()
+def get_shift_invoices(pos_opening_shift):
+	validate_shift_access(pos_opening_shift)
+	return frappe.get_all(
+		"Sales Invoice",
+		filters={"posa_pos_opening_shift": pos_opening_shift},
+		fields=[
+			"name",
+			"customer",
+			"customer_name",
+			"grand_total",
+			"docstatus",
+			"status",
+			"workflow_state",
+			"is_return",
+			"posa_is_printed",
+			"posting_date",
+			"posting_time",
+			"modified",
+		],
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+
+
+@frappe.whitelist()
+def get_shift_draft_invoices(pos_opening_shift):
+	validate_shift_access(pos_opening_shift)
+	return frappe.get_list(
+		"Sales Invoice",
+		filters={"posa_pos_opening_shift": pos_opening_shift, "docstatus": 0},
+		fields=[
+			"name",
+			"customer",
+			"customer_name",
+			"grand_total",
+			"docstatus",
+			"status",
+			"workflow_state",
+			"is_return",
+			"posa_is_printed",
+			"posting_date",
+			"posting_time",
+			"modified",
+		],
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+
+
+@frappe.whitelist()
+def get_all_reasons_for_cancellation():
+	return frappe.get_all(
+		"Reason For Cancellation",
+		fields=["reason"],
+		limit_page_length=0,
+	)
+
 # ---------------------------------------------------------------------------
 # Returns and orders
 # ---------------------------------------------------------------------------
