@@ -178,7 +178,7 @@ async function save() {
 
 			<!-- Referrals. A code entered here credits whoever sent this customer in;
 			     the code below is this customer's own, for them to pass on. -->
-			<label v-if="!props.customerId" class="block sm:col-span-2">
+			<!-- <label v-if="!props.customerId" class="block sm:col-span-2">
 				<span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-subtle">
 					Referred by (code)
 				</span>
@@ -189,7 +189,7 @@ async function save() {
 					placeholder="Optional"
 					class="h-10 w-full rounded-card border-line bg-surface text-sm font-mono uppercase focus:border-accent focus:ring-0"
 				/>
-			</label>
+			</label> -->
 
 			<div v-if="ownReferralCode" class="sm:col-span-2">
 				<span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-subtle">

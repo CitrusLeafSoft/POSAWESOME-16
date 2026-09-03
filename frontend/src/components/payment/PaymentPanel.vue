@@ -11,15 +11,17 @@ import {
 	Loader2,
 	Printer,
 	Plus,
+	RotateCcw,
 	Smartphone,
 	WalletCards,
 } from "lucide-vue-next";
-import { formatCurrency, formatFloat, toNumber } from "@/lib/format";
+import { formatCurrency, formatDate, formatFloat, toNumber } from "@/lib/format";
 import { usePaymentsStore } from "@/stores/payments";
 import { useCartStore } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
 import { useOffersStore } from "@/stores/offers";
 import { useSessionStore } from "@/stores/session";
+import type { CreditNoteRow } from "@/types";
 
 const payments = usePaymentsStore();
 const cart = useCartStore();
@@ -39,6 +41,15 @@ const isReturn = computed(() => cart.isReturn);
 const canUseCredit = computed(
 	() => !isReturn.value && !!session.profile?.use_customer_credit && payments.credit.length > 0,
 );
+/** Credit notes are their own choice, shown separately from advance credit. */
+const canUseCreditNotes = computed(
+	() => !isReturn.value && !!session.profile?.use_customer_credit && payments.creditNotes.length > 0,
+);
+
+/** The original invoice a credit note was issued against. */
+function creditNoteAgainst(row: CreditNoteRow): string {
+	return row.return_against ?? "";
+}
 const mpesaEnabled = computed(() => !!session.profile?.posa_allow_mpesa_reconcile_payments);
 /** Loyalty redemption shows whenever the customer carries a balance to spend. */
 const canRedeem = computed(
@@ -59,10 +70,14 @@ watch(
 	},
 );
 
-// Credit belongs to a customer, so a stale list would offer somebody else's money.
+// Credit and credit notes belong to a customer, so a stale list would offer
+// somebody else's money.
 watch(
 	() => cart.customer,
-	() => void payments.loadCredit(),
+	() => {
+		void payments.loadCredit();
+		void payments.loadCreditNotes();
+	},
 	{ immediate: true },
 );
 
@@ -290,6 +305,68 @@ function openMpesa() {
 					</div>
 				</div>
 
+				<!-- Credit notes — returned invoices the customer can spend. Separate
+				     from the advance credit above: checking a note applies its whole
+				     remaining balance, and the cash due drops at once. -->
+				<div
+					v-if="canUseCreditNotes"
+					class="space-y-2 rounded-card border border-success/40 bg-success-soft/30 p-2"
+				>
+					<div class="flex items-center gap-2">
+						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-success-soft text-success">
+							<RotateCcw class="size-4" />
+						</span>
+						<div class="min-w-0 flex-1">
+							<p class="text-sm font-medium">Credit notes</p>
+							<p class="text-[11px] text-subtle">
+								{{ formatCurrency(payments.creditNoteAvailable) }} available ·
+								{{ formatCurrency(payments.creditNoteApplied) }} applied
+							</p>
+						</div>
+						<button
+							v-if="payments.creditNoteApplied > 0"
+							type="button"
+							class="h-8 rounded-card px-2 text-xs font-medium text-subtle transition hover:text-danger"
+							@click="payments.clearCreditNotes()"
+						>
+							Clear
+						</button>
+					</div>
+
+					<div
+						v-for="row in payments.creditNotes"
+						:key="row.name"
+						class="flex items-start gap-2 ps-11"
+					>
+						<input
+							:id="`credit-note-${row.name}`"
+							type="checkbox"
+							class="mt-1 size-4 shrink-0 rounded border-line accent-accent"
+							:checked="!!row.selected"
+							@change="payments.toggleCreditNote(row.name, ($event.target as HTMLInputElement).checked)"
+						/>
+						<label class="min-w-0 flex-1 cursor-pointer" :for="`credit-note-${row.name}`">
+							<span class="flex items-center gap-1.5 text-xs font-medium">
+								<span class="truncate">Credit note</span>
+								<span class="shrink-0 font-mono font-normal text-subtle">{{ row.name }}</span>
+							</span>
+							<span class="block text-[11px] text-subtle">
+								{{ formatDate(row.posting_date as string) }} ·
+								{{ formatCurrency(row.total_credit) }} available
+								<template v-if="creditNoteAgainst(row)">
+									· against {{ creditNoteAgainst(row) }}
+								</template>
+							</span>
+						</label>
+						<span class="shrink-0 text-right text-xs font-semibold tnum">
+							<span v-if="toNumber(row.credit_to_redeem) > 0" class="text-success">
+								−{{ formatCurrency(row.credit_to_redeem) }}
+							</span>
+							<span v-else class="text-subtle">0</span>
+						</span>
+					</div>
+				</div>
+
 				<!-- M-Pesa: reconcile a transaction the customer has already sent -->
 				<button
 					v-if="mpesaEnabled"
@@ -345,6 +422,10 @@ function openMpesa() {
 				<div v-if="payments.creditTendered > 0 && !isReturn" class="flex justify-between text-sm">
 					<span class="text-warning">On credit</span>
 					<span class="font-semibold tnum text-warning">{{ formatCurrency(payments.creditTendered) }}</span>
+				</div>
+				<div v-if="payments.creditNoteApplied > 0 && !isReturn" class="flex justify-between text-sm">
+					<span class="text-success">By credit note</span>
+					<span class="font-semibold tnum text-success">−{{ formatCurrency(payments.creditNoteApplied) }}</span>
 				</div>
 				<div class="flex justify-between text-sm">
 					<span :class="payments.outstanding > 0 ? 'text-danger' : 'text-muted'">

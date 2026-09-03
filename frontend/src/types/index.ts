@@ -335,6 +335,20 @@ export interface CreditRow {
 	credit_to_redeem: number;
 }
 
+export interface CreditNoteRow {
+	name: string;
+	type: "Invoice";
+	customer: string;
+	customer_name?: string;
+	posting_date?: string;
+	grand_total?: number;
+	outstanding_amount?: number;
+	total_credit: number;
+	credit_to_redeem: number;
+	return_against?: string | null;
+	selected?: boolean;
+}
+
 export interface ShiftAnalytics {
 	shift: string;
 	opened_at: string;

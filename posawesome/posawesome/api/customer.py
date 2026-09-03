@@ -366,6 +366,38 @@ def get_available_credit(customer, company):
 
 
 @frappe.whitelist()
+def get_available_credit_notes(customer, company):
+	notes = []
+	for row in frappe.get_all(
+		"Sales Invoice",
+		filters={
+			"outstanding_amount": ["<", 0],
+			"docstatus": 1,
+			"is_return": 1,
+			"customer": customer,
+			"company": company,
+		},
+		fields=["name", "posting_date", "grand_total", "outstanding_amount", "return_against", "customer_name"],
+		order_by="posting_date asc",
+	):
+		notes.append(
+			{
+				"name": row.name,
+				"type": "Invoice",
+				"customer": customer,
+				"customer_name": row.customer_name,
+				"posting_date": row.posting_date,
+				"grand_total": row.grand_total,
+				"outstanding_amount": row.outstanding_amount,
+				"total_credit": -row.outstanding_amount,
+				"credit_to_redeem": 0,
+				"return_against": row.return_against,
+			}
+		)
+	return notes
+
+
+@frappe.whitelist()
 def get_sales_person_names():
 	return frappe.get_all(
 		"Sales Person",
