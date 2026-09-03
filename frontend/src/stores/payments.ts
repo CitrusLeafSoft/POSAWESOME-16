@@ -9,7 +9,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api } from "@/lib/api";
 import { money, toNumber } from "@/lib/format";
-import type { CreditRow, PaymentMethod } from "@/types";
+import type { CreditNoteRow, CreditRow, PaymentMethod } from "@/types";
 import { useCartStore } from "./cart";
 import { useSessionStore } from "./session";
 import { useSyncStore } from "./sync";
@@ -33,6 +33,10 @@ export const usePaymentsStore = defineStore("payments", () => {
 	/** Credit notes and advances the customer can spend on this sale. */
 	const credit = ref<CreditRow[]>([]);
 	const loadingCredit = ref(false);
+	/** Credit notes (returned sales invoices, is_return=1) the customer can spend.
+	 *  Kept apart from `credit` (advances) so the two choices stay independent. */
+	const creditNotes = ref<CreditNoteRow[]>([]);
+	const loadingCreditNotes = ref(false);
 	const submitting = ref(false);
 	/** True once the cashier edits amounts by hand — auto-tender then stands down. */
 	const touched = ref(false);
@@ -73,12 +77,21 @@ export const usePaymentsStore = defineStore("payments", () => {
 	const creditAvailable = computed(() =>
 		money(credit.value.reduce((sum, row) => sum + toNumber(row.total_credit), 0)),
 	);
+
+	const creditNoteApplied = computed(() =>
+		cart.isReturn
+			? 0
+			: money(creditNotes.value.reduce((sum, row) => sum + toNumber(row.credit_to_redeem), 0)),
+	);
+	const creditNoteAvailable = computed(() =>
+		money(creditNotes.value.reduce((sum, row) => sum + toNumber(row.total_credit), 0)),
+	);
 	/** Redemption covers part of the total before any cash is counted. */
 	const redeemed = computed(() =>
 		cart.isReturn ? 0 : money(toNumber(cart.loyaltyAmount) + creditApplied.value),
 	);
 	const payable = computed(() => {
-		const gross = cart.payableAmount - redeemed.value;
+		const gross = cart.payableAmount - redeemed.value - creditNoteApplied.value;
 		// Only a sale can never fall below zero. A refund's total is negative by
 		// design, and clamping it to zero left nothing to tender — so `canSubmit`,
 		// which wants a non-zero paid amount, refused every refund outright.
@@ -110,7 +123,10 @@ export const usePaymentsStore = defineStore("payments", () => {
 				// A credit tender covers what cash doesn't — the invoice goes to approval.
 				(creditTendered.value > 0 && covered.value) ||
 				// Cash / bank tender: settled, or the profile tolerates a partial pay.
-				(Math.abs(paid.value) > 0 && (covered.value || allowPartialPayment.value))
+				// A credit-note covered ticket settles with no cash leg at all, so
+				// `paid` may be zero there.
+				((Math.abs(paid.value) > 0 || creditNoteApplied.value > 0) &&
+					(covered.value || allowPartialPayment.value))
 			),
     );
 
@@ -128,6 +144,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 	function reset() {
 		build();
 		credit.value = [];
+		creditNotes.value = [];
 		lastInvoice.value = null;
 	}
 
@@ -158,6 +175,69 @@ export const usePaymentsStore = defineStore("payments", () => {
 		} finally {
 			loadingCredit.value = false;
 		}
+	}
+
+	async function loadCreditNotes() {
+		creditNotes.value = [];
+		if (!cart.customer || !session.companyName) return;
+		if (!session.profile?.use_customer_credit) return;
+		loadingCreditNotes.value = true;
+		try {
+			const rowsFromServer = (await api.availableCreditNotes(
+				cart.customer,
+				session.companyName,
+			)) as CreditNoteRow[];
+			creditNotes.value = (rowsFromServer ?? []).map((row) => ({
+				...row,
+				total_credit: toNumber(row.total_credit),
+				credit_to_redeem: 0,
+				selected: false,
+			}));
+		} catch {
+			// Credit is an optional convenience; failing to read it must not stop a sale.
+		} finally {
+			loadingCreditNotes.value = false;
+		}
+	}
+
+	function toggleCreditNote(origin: string, selected: boolean) {
+		const row = creditNotes.value.find((entry) => entry.name === origin);
+		if (!row) return;
+		row.selected = selected;
+		if (!selected) row.credit_to_redeem = 0;
+		touched.value = false;
+		rebalanceCreditNotes();
+	}
+
+	function rebalanceCreditNotes() {
+		let room = money(
+			Math.max(
+				cart.payableAmount - toNumber(cart.loyaltyAmount) - creditApplied.value,
+				0,
+			),
+		);
+		for (const row of creditNotes.value) {
+			if (!row.selected) {
+				row.credit_to_redeem = 0;
+				continue;
+			}
+			const take = money(Math.min(toNumber(row.total_credit), room));
+			row.credit_to_redeem = take;
+			room = money(room - take);
+		}
+		// Credit changes what is left to tender, so any auto-tender has to run again.
+		touched.value = false;
+		balanceTender();
+	}
+
+	/** Release every credit note back to the customer. */
+	function clearCreditNotes() {
+		for (const row of creditNotes.value) {
+			row.selected = false;
+			row.credit_to_redeem = 0;
+		}
+		touched.value = false;
+		balanceTender();
 	}
 
 	/** Spend an amount from one credit origin, capped at what it holds. */
@@ -274,11 +354,23 @@ export const usePaymentsStore = defineStore("payments", () => {
 			custom_is_pos_credit: isPosCredit.value ? 1 : 0,
 		};
 
+		const applied = money(creditApplied.value + creditNoteApplied.value);
+
 		const data: Record<string, unknown> = {
 			due_date: cart.dueDate ?? undefined,
-			redeemed_customer_credit: creditApplied.value || undefined,
-			customer_credit_dict: creditApplied.value
-				? credit.value.filter((row) => toNumber(row.credit_to_redeem) > 0)
+			redeemed_customer_credit: applied || undefined,
+			customer_credit_dict: applied
+				? [
+						...credit.value.filter((row) => toNumber(row.credit_to_redeem) > 0),
+						...creditNotes.value
+							.filter((row) => toNumber(row.credit_to_redeem) > 0)
+							.map((row) => ({
+								type: row.type,
+								credit_origin: row.name,
+								total_credit: row.total_credit,
+								credit_to_redeem: row.credit_to_redeem,
+							})),
+				  ]
 				: undefined,
 			credit_change: change.value || undefined,
 		};
@@ -405,6 +497,8 @@ export const usePaymentsStore = defineStore("payments", () => {
 		rows,
 		credit,
 		loadingCredit,
+		creditNotes,
+		loadingCreditNotes,
 		submitting,
 		touched,
 		lastInvoice,
@@ -415,6 +509,8 @@ export const usePaymentsStore = defineStore("payments", () => {
 		redeemed,
 		creditApplied,
 		creditAvailable,
+		creditNoteApplied,
+		creditNoteAvailable,
 		payable,
 		remaining,
 		outstanding,
@@ -424,6 +520,9 @@ export const usePaymentsStore = defineStore("payments", () => {
 		build,
 		reset,
 		loadCredit,
+		loadCreditNotes,
+		toggleCreditNote,
+		clearCreditNotes,
 		setCredit,
 		applyMaxCredit,
 		clearCredit,

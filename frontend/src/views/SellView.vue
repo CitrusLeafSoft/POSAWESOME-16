@@ -81,12 +81,12 @@ const stop = registerHotkeys([
 		group: "Sale",
 		handler: () => ui.setWorkspace(ui.workspace === "coupons" ? "catalog" : "coupons"),
 	},
-	{
-		combo: "F3",
-		label: "Held invoices",
-		group: "Sale",
-		handler: () => ui.openModal("drafts"),
-	},
+	// {
+	// 	combo: "F3",
+	// 	label: "Held invoices",
+	// 	group: "Sale",
+	// 	handler: () => ui.openModal("drafts"),
+	// },
 	{
 		combo: "shift+F3",
 		label: "Return against an invoice",

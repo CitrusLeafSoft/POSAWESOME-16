@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /** The invoice: who it is for, what is on it, and what it comes to. */
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import {
 	ClipboardList,
 	CreditCard,
-	FileClock,
+	// FileClock,
 	Gift,
-	Loader2,
-	Pause,
+	// Loader2,
+	// Pause,
 	Percent,
 	Settings2,
 	ShoppingCart,
@@ -35,7 +35,7 @@ const offers = useOffersStore();
 const payments = usePaymentsStore();
 const session = useSessionStore();
 
-const holding = ref(false);
+// const holding = ref(false);
 const canPay = computed(() => !cart.isEmpty && !!cart.customer);
 
 function abandonReturn() {
@@ -50,34 +50,34 @@ function abandonReturn() {
 	});
 }
 
-async function hold() {
-	if (cart.isEmpty || !cart.customer) {
-		ui.warn(cart.isEmpty ? "The cart is empty" : "Pick a customer first");
-		return;
-	}
-	holding.value = true;
-	try {
-		const doc = await cart.saveDraft();
-		if (doc) {
-			ui.success("Invoice held", doc.name as string);
-			cart.reset();
-		}
-	} catch (error) {
-		// Holding parks a *draft* on the server, which needs a name only the server can
-		// issue — so unlike completing a sale it cannot be queued. Say that plainly
-		// instead of surfacing a bare "Offline".
-		if (!session.serverReachable) {
-			ui.warn(
-				"Cannot hold while offline",
-				"Holding needs the server. Complete the sale instead — it will be kept on this terminal and sent when the connection returns.",
-			);
-			return;
-		}
-		ui.fail("Could not hold the invoice", error instanceof Error ? error.message : String(error));
-	} finally {
-		holding.value = false;
-	}
-}
+// async function hold() {
+// 	if (cart.isEmpty || !cart.customer) {
+// 		ui.warn(cart.isEmpty ? "The cart is empty" : "Pick a customer first");
+// 		return;
+// 	}
+// 	holding.value = true;
+// 	try {
+// 		const doc = await cart.saveDraft();
+// 		if (doc) {
+// 			ui.success("Invoice held", doc.name as string);
+// 			cart.reset();
+// 		}
+// 	} catch (error) {
+// 		// Holding parks a *draft* on the server, which needs a name only the server can
+// 		// issue — so unlike completing a sale it cannot be queued. Say that plainly
+// 		// instead of surfacing a bare "Offline".
+// 		if (!session.serverReachable) {
+// 			ui.warn(
+// 				"Cannot hold while offline",
+// 				"Holding needs the server. Complete the sale instead — it will be kept on this terminal and sent when the connection returns.",
+// 			);
+// 			return;
+// 		}
+// 		ui.fail("Could not hold the invoice", error instanceof Error ? error.message : String(error));
+// 	} finally {
+// 		holding.value = false;
+// 	}
+// }
 </script>
 
 <template>
@@ -118,13 +118,13 @@ async function hold() {
 				>
 					<X class="size-3.5" /> Cancel return
 				</button>
-				<button
+				<!-- <button
 					type="button"
 					class="inline-flex shrink-0 items-center gap-1.5 rounded-card px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
 					@click="ui.openModal('drafts')"
 				>
 					<FileClock class="size-3.5" /> Held <kbd class="font-mono text-[10px] text-subtle">F3</kbd>
-				</button>
+				</button> -->
 				<button
 					type="button"
 					class="inline-flex shrink-0 items-center gap-1.5 rounded-card px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
@@ -231,7 +231,7 @@ async function hold() {
 		<CartTotals v-if="!cart.isEmpty" />
 
 		<footer class="flex shrink-0 gap-2 p-3 pt-0">
-			<button
+			<!-- <button
 				type="button"
 				class="flex h-13 w-13 shrink-0 items-center justify-center rounded-card border border-line bg-surface text-muted shadow-xs transition hover:border-warning hover:text-warning disabled:opacity-40"
 				:title="cart.isReturn ? 'A return cannot be held' : 'Hold this invoice'"
@@ -241,7 +241,7 @@ async function hold() {
 			>
 				<Loader2 v-if="holding" class="size-5 animate-spin" />
 				<Pause v-else class="size-5" />
-			</button>
+			</button> -->
 			<button
 				type="button"
 				class="flex h-13 min-w-0 flex-1 items-center justify-center gap-2 rounded-card text-base font-semibold shadow-glow transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-subtle disabled:shadow-none"

@@ -234,6 +234,8 @@ export const api = {
 	makeAddress: (args: Record<string, unknown>) => call<unknown>(`${NS}.customer.make_address`, { args }),
 	availableCredit: (customer: string, company: string) =>
 		call<unknown>(`${NS}.customer.get_available_credit`, { customer, company }),
+	availableCreditNotes: (customer: string, company: string) =>
+		call<unknown>(`${NS}.customer.get_available_credit_notes`, { customer, company }),
 	salesPersons: () => call<unknown>(`${NS}.customer.get_sales_person_names`, {}, { method: "GET" }),
 
 	/* Invoice */

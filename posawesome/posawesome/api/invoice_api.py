@@ -47,7 +47,6 @@ def update_invoice(data):
 			frappe.throw(_("Invoice {0} is already submitted").format(doc.name))
 		doc.update(data)
 	else:
-		print(data,"================data")
 		doc = frappe.get_doc(data)
 
 	doc.set_missing_values()
@@ -147,14 +146,13 @@ def submit_invoice(invoice, data):
 
 	doc.update(invoice)
 
-	# A "Credit" payment mode is not money taken — drop it from payments so it
-	# stays outstanding on the invoice (and can go through credit approval). The
-	# SPA already does this, but an offline replay or a stray payload must not
-	# book it as a payment.
+
 	_require_credit_mode(doc)
 
+	if doc.get("is_return"):
+		doc.custom_is_pos_credit = 0
+
 	if invoice.get("posa_delivery_date"):
-		# A future delivery is fulfilled by the Sales Order, not by this invoice.
 		doc.update_stock = 0
 
 	cash_account = _resolve_cash_account(doc)
@@ -168,6 +166,11 @@ def submit_invoice(invoice, data):
 
 	is_payment_entry = _attach_advances(doc, data)
 	payments = list(doc.payments)
+
+	if flt(data.get("redeemed_customer_credit")) and not doc.payments and flt(doc.get("grand_total")) > 0:
+		mode = _default_payment_mode(doc)
+		if mode:
+			doc.append("payments", {"mode_of_payment": mode, "amount": 0, "base_amount": 0})
 
 	# v16: flag rows so ERPNext materialises the Serial and Batch Bundle on submit.
 	auto_set_batch = cint(frappe.get_cached_value("POS Profile", doc.pos_profile, "posa_auto_set_batch"))
@@ -203,13 +206,11 @@ def submit_invoice(invoice, data):
 
 
 def _is_pos_credit_sale(doc):
-	"""True when this is a POS credit sale: flagged and still carrying a balance.
-
-	A tender through a "Credit" mode never lands in ``payments`` (it is stripped
-	below), so ``paid_amount`` stays below the total and the remainder is genuine
-	outstanding that has to be approved.
-	"""
-	return cint(doc.get("custom_is_pos_credit")) and _outstanding(doc) > 0
+	return (
+		not doc.get("is_return")
+		and cint(doc.get("custom_is_pos_credit"))
+		and _outstanding(doc) > 0
+	)
 
 
 def _require_credit_mode(doc):
@@ -226,12 +227,18 @@ def _outstanding(doc):
 	return flt(doc.get("grand_total")) - flt(doc.get("paid_amount"))
 
 
-def _needs_discount_approval(doc):
-	"""True when any item is sold below its normal lowest cost (custom_nlc > rate).
+def _default_payment_mode(doc):
+	if not doc.pos_profile:
+		return None
+	mode = frappe.db.get_value("POS Payment Method", {"parent": doc.pos_profile, "default": 1}, "mode_of_payment")
+	if not mode:
+		mode = frappe.db.get_value("POS Payment Method", {"parent": doc.pos_profile}, "mode_of_payment")
+	return mode
 
-	Such a discount needs approval, mirroring the credit-sale gate: the invoice is
-	parked in "Pending Discount Approval" instead of being submitted.
-	"""
+
+def _needs_discount_approval(doc):
+	if doc.get("is_return"):
+		return False
 	for item in doc.get("items") or []:
 		if flt(item.get("custom_nlc")) > flt(item.get("rate")):
 			return True
@@ -239,12 +246,9 @@ def _needs_discount_approval(doc):
 
 
 def docstatus_is_pending_credit(doc):
-	"""True for a draft invoice still waiting on workflow approval.
-
-	Covers both the credit and the discount-below-NLC parking states, so neither
-	is ever auto-submitted by the background job.
-	"""
 	if doc.docstatus != 0:
+		return False
+	if doc.get("is_return"):
 		return False
 	if cint(doc.get("custom_is_pos_credit")):
 		return doc.get("workflow_state") == "Pending Credit Approval" or _outstanding(doc) > 0
@@ -254,16 +258,6 @@ def docstatus_is_pending_credit(doc):
 
 
 def _hold_for_workflow(doc, state, pending_flag):
-	"""Send a POS invoice through the approval workflow instead of submitting.
-
-	The active Sales Invoice workflow jumps fully-approved invoices straight to
-	"Approved" on submit, but here we park a *draft* in the given workflow state
-	(e.g. "Pending Credit Approval" / "Pending Discount Approval"). Setting the
-	workflow state directly (rather than a normal save) avoids the workflow
-	permission check that would demand the cashier hold the approver role to
-	transition Draft -> Pending. We then fire the same on_update hook ERPNext uses
-	so it raises a Workflow Action for the approver to approve or reject it.
-	"""
 	from frappe.workflow.doctype.workflow_action.workflow_action import process_workflow_actions
 
 	frappe.db.set_value("Sales Invoice", doc.name, "workflow_state", state, update_modified=False)
@@ -421,53 +415,80 @@ def settle_customer_credit(doc, data, is_payment_entry, total_cash, cash_account
 
 
 def _knock_off_credit_invoices(doc, data):
-	"""Offset credit sitting on old invoices against this one, via a journal entry."""
+	
+	credit_notes = [
+		row
+		for row in (data.get("customer_credit_dict") or [])
+		if row.get("type") == "Invoice" and flt(row.get("credit_to_redeem")) > 0
+	]
+	if not credit_notes:
+		return
+
+	remaining_outstanding = flt(frappe.db.get_value("Sales Invoice", doc.name, "outstanding_amount"))
+	if remaining_outstanding <= 0:
+		return
+
 	cost_center = frappe.get_cached_value("POS Profile", doc.pos_profile, "cost_center") or frappe.get_cached_value(
 		"Company", doc.company, "cost_center"
 	)
 	if not cost_center:
 		frappe.throw(_("Cost Center is not set on POS Profile {0}").format(doc.pos_profile))
 
-	for row in data.get("customer_credit_dict") or []:
-		if row.get("type") != "Invoice" or not flt(row.get("credit_to_redeem")):
-			continue
+	reconcile_doc = frappe.new_doc("Payment Reconciliation")
+	reconcile_doc.party_type = "Customer"
+	reconcile_doc.party = doc.customer
+	reconcile_doc.company = doc.company
+	reconcile_doc.receivable_payable_account = doc.debit_to
+	reconcile_doc.get_unreconciled_entries()
+
+	args = {
+		"invoices": [
+			{
+				"invoice_type": "Sales Invoice",
+				"invoice_number": doc.name,
+				"invoice_date": getdate(doc.posting_date or nowdate()),
+				"amount": flt(doc.grand_total) or remaining_outstanding,
+				"outstanding_amount": remaining_outstanding,
+				"currency": doc.currency,
+				"exchange_rate": flt(doc.conversion_rate) or 1,
+			}
+		],
+		"payments": [],
+	}
+
+	remaining = remaining_outstanding
+	for row in credit_notes:
+		if remaining <= 0:
+			break
 
 		origin = frappe.get_doc("Sales Invoice", row.get("credit_origin"))
-		amount = flt(row.get("credit_to_redeem"))
+		# The note's outstanding is negative; the redeemable balance is its inverse.
+		note_available = -flt(origin.outstanding_amount)
+		amount = min(flt(row.get("credit_to_redeem")), remaining, note_available)
+		if amount <= 0:
+			continue
 
-		journal = frappe.get_doc(
+		args["payments"].append(
 			{
-				"doctype": "Journal Entry",
-				"voucher_type": "Journal Entry",
-				"posting_date": nowdate(),
-				"company": doc.company,
-				"accounts": [
-					{
-						"account": origin.debit_to,
-						"party_type": "Customer",
-						"party": doc.customer,
-						"reference_type": "Sales Invoice",
-						"reference_name": origin.name,
-						"debit_in_account_currency": amount,
-						"cost_center": cost_center,
-					},
-					{
-						"account": doc.debit_to,
-						"party_type": "Customer",
-						"party": doc.customer,
-						"reference_type": "Sales Invoice",
-						"reference_name": doc.name,
-						"credit_in_account_currency": amount,
-						"cost_center": cost_center,
-					},
-				],
+				"reference_type": "Sales Invoice",
+				"reference_name": origin.name,
+				"posting_date": origin.posting_date or nowdate(),
+				"amount": amount,
+				"unallocated_amount": amount,
+				"difference_amount": 0,
+				"currency": origin.currency,
+				"exchange_rate": flt(origin.conversion_rate) or 1,
+				"cost_center": cost_center,
 			}
 		)
-		journal.flags.ignore_permissions = True
-		frappe.flags.ignore_account_permission = True
-		journal.set_missing_values()
-		journal.insert()
-		journal.submit()
+		remaining = flt(remaining) - flt(amount)
+
+	if not args["payments"]:
+		return
+
+	reconcile_doc.allocate_entries(args)
+	reconcile_doc.validate_allocation()
+	reconcile_doc.reconcile_allocations()
 
 
 def _book_cash_legs(doc, data, payments):
@@ -610,7 +631,7 @@ def get_all_reasons_for_cancellation():
 @frappe.whitelist()
 def search_invoices_for_return(invoice_name, company, customer=None, limit=20):
 	"""Submitted invoices eligible to be returned against."""
-	filters = {"company": company, "docstatus": 1, "is_return": 0}
+	filters = {"company": company, "docstatus": 1, "is_return": 0, "status": ["not in", ["Unpaid", "Partly Paid"]]}
 	if invoice_name:
 		filters["name"] = ["like", f"%{invoice_name}%"]
 	if customer:
