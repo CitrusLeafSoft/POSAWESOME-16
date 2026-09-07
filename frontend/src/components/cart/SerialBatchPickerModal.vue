@@ -55,6 +55,16 @@ function toggleSerial(serial: SerialInfo, event: Event) {
 	}
 }
 
+/** True when every visible serial under the current batch is picked. */
+const allChosen = computed(() =>
+	series.value.length > 0 && series.value.every((no) => chosen.value.includes(no)),
+);
+
+/** Select every available serial (or clear them all). */
+function toggleSelectAll() {
+	chosen.value = allChosen.value ? [] : [...series.value];
+}
+
 /** Let the cashier pick a different batch; serials reset until re-picked. */
 function pickBatch(value: string) {
 	batchNo.value = value;
@@ -89,8 +99,18 @@ function commit() {
 
 			<div v-if="line.has_serial_no" class="flex flex-col gap-2">
 				<div class="flex items-center justify-between">
-					<p class="text-[11px] font-semibold uppercase tracking-wide text-subtle">Serial numbers</p>
-					<p class="text-[11px] tnum text-muted">
+					<label class="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle select-none">
+						<input type="checkbox" :checked="allChosen"
+							class="size-3.5 rounded border-line accent-accent"
+							@change="toggleSelectAll" />
+						Select all
+					</label>
+					<p class="flex items-center gap-3 text-[11px] tnum text-muted">
+						<button type="button"
+							class="font-semibold text-accent transition hover:underline disabled:pointer-events-none disabled:text-muted"
+							:disabled="!chosen.length" @click="chosen = []">
+							Deselect all
+						</button>
 						{{ chosen.length }} of {{ series.length }} available
 					</p>
 				</div>
