@@ -56,7 +56,7 @@ const canRedeem = computed(
 	() =>
 		!isReturn.value &&
 		toNumber(cart.customerInfo?.loyalty_points) > 0 &&
-		toNumber(cart.customerInfo?.conversion_factor) > 0,
+		toNumber(cart.customerInfo?.conversion_factor) > 0 && !!session.profile?.posa_allow_loyalty_redemption,
 );
 /** The Mode of Payment treated as credit (its tender stays outstanding). */
 const CREDIT_MODE = "Credit";
@@ -115,6 +115,10 @@ function print() {
 
 function openMpesa() {
 	ui.openModal("mpesa");
+}
+
+function openLoyaltyDetails() {
+	ui.openModal("loyaltyDetails");
 }
 </script>
 
@@ -209,6 +213,11 @@ function openMpesa() {
 							{{ formatCurrency(cart.maxLoyaltyAmount) }}
 						</span>
 					</label>
+					<span>
+						<button  @click="openLoyaltyDetails" class="px-1.5 py-1 text-[11px] font-semibold text-violet hover:underline">
+							See details
+						</button>
+					</span>
 					<input
 						id="loyalty-redeem"
 						:value="cart.loyaltyAmount || ''"
