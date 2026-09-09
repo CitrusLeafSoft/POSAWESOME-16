@@ -236,6 +236,8 @@ export const api = {
 		call<unknown>(`${NS}.customer.get_available_credit`, { customer, company }),
 	availableCreditNotes: (customer: string, company: string) =>
 		call<unknown>(`${NS}.customer.get_available_credit_notes`, { customer, company }),
+	loyaltyPointsDetails: (customer: string) =>
+		call<unknown>(`${NS}.customer.get_loyalty_points_details`, { customer }),
 	salesPersons: () => call<unknown>(`${NS}.customer.get_sales_person_names`, {}, { method: "GET" }),
 
 	/* Invoice */

@@ -55,6 +55,7 @@ const registry: Record<string, Component> = {
 	lineDetails: lazy(() => import("@/components/cart/CartLineDetailsModal.vue")),
 	serialBatch: lazy(() => import("@/components/cart/SerialBatchPickerModal.vue")),
 	mpesa: lazy(() => import("@/components/payment/MpesaModal.vue")),
+	loyaltyDetails: lazy(() => import("@/components/payment/LoyaltyDetailsModal.vue")),
 	queue: SyncQueueModal,
 	print: lazy(() => import("@/components/payment/PrintModal.vue")),
 };

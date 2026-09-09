@@ -72,7 +72,7 @@ scheduler_events = {
 fixtures = [
 	{
 		"doctype": "Custom Field",
-		"filters": [["name", "like", "%-posa_%"]],
+		"filters": [["name", "like", "%-posa_%"],["module", "in", ["POSAwesome"]]],
 	},
 	{
 		"doctype": "Custom Field",

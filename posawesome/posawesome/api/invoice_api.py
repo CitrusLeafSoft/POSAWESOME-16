@@ -12,13 +12,14 @@ submitted on payment. Two things changed materially for v16:
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate, nowdate
+from frappe.utils import cint, flt, getdate, nowdate,get_datetime
 from frappe.utils.background_jobs import enqueue
 
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 from erpnext.accounts.utils import get_account_currency
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from erpnext.setup.utils import get_exchange_rate
+from .customer import check_customer_transaction_threshold, check_loyalty_redemption_cooldown
 
 from posawesome.posawesome.api.utils import (
 	apply_serial_batch_fields,
@@ -50,6 +51,9 @@ def update_invoice(data):
 		doc = frappe.get_doc(data)
 
 	doc.set_missing_values()
+
+	_set_naming_series(doc)
+
 	doc.flags.ignore_permissions = True
 	frappe.flags.ignore_account_permission = True
 
@@ -71,6 +75,14 @@ def update_invoice(data):
 		i.custom_rsp = item_doc.custom_rsp
 	doc.save()
 	return doc
+
+def _set_naming_series(doc):
+	series = frappe.get_cached_value("POS Profile", doc.pos_profile, "posa_invoice_naming_series")
+
+	if not series:
+		frappe.throw(_("POS Invoice Naming Series is not set on POS Profile {0}").format(doc.pos_profile))
+
+	doc.naming_series = series
 
 
 def _prepare_return(doc):
@@ -196,6 +208,10 @@ def submit_invoice(invoice, data):
 	background = cint(
 		frappe.get_cached_value("POS Profile", doc.pos_profile, "posa_allow_submissions_in_background_job")
 	)
+	
+	_check_min_transactions_to_redeem_loyalty_points(doc)
+	_check_loyalty_redemption_cooldown(doc)
+
 	if background:
 		_enqueue_pending_submissions(doc, data, is_payment_entry, total_cash, cash_account, payments)
 	else:
@@ -212,6 +228,28 @@ def _is_pos_credit_sale(doc):
 		and _outstanding(doc) > 0
 	)
 
+def _check_min_transactions_to_redeem_loyalty_points(doc):
+	if not doc.redeem_loyalty_points:
+		return
+	if not doc.customer:
+		return
+	if doc.redeem_loyalty_points:
+		if not check_customer_transaction_threshold(doc.customer):
+			frappe.throw(
+				_("Customer {0} has not reached the minimum transaction threshold to redeem loyalty points").format(
+					frappe.bold(doc.customer)
+				)
+			)
+
+def _check_loyalty_redemption_cooldown(doc):
+	if not doc.redeem_loyalty_points:
+		return
+	if not doc.customer:
+		return
+	if not check_loyalty_redemption_cooldown(doc.customer):
+		frappe.throw(
+			_("Customer {0} is still in the loyalty redemption cooldown period").format(frappe.bold(doc.customer))
+		)
 
 def _require_credit_mode(doc):
 	"""Drop any payment row whose Mode of Payment is "Credit".

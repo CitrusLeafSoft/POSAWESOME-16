@@ -3,6 +3,8 @@
 import frappe
 from frappe import _
 from frappe.utils import cint
+from frappe.utils import now_datetime, get_datetime
+from datetime import timedelta
 
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import (
 	get_loyalty_program_details_with_points,
@@ -406,3 +408,124 @@ def get_sales_person_names():
 		order_by="sales_person_name",
 		limit_page_length=0,
 	)
+
+
+@frappe.whitelist()
+def get_loyalty_points_details(customer):
+	if not customer:
+		frappe.throw(_("Customer not found"))
+
+	loyalty_program = frappe.get_value(
+		"Customer",
+		customer,
+		"loyalty_program"
+	)
+
+	if not loyalty_program:
+		frappe.throw(_("Customer does not have a loyalty program assigned"))
+
+	loyalty_point_entry = frappe.qb.DocType("Loyalty Point Entry")
+
+	entries = (
+		frappe.qb.from_(loyalty_point_entry)
+		.select(
+			loyalty_point_entry.invoice,
+			loyalty_point_entry.loyalty_points,
+			loyalty_point_entry.expiry_date,
+			loyalty_point_entry.loyalty_program,
+		)
+		.where(
+			(loyalty_point_entry.customer == customer)
+			& (loyalty_point_entry.loyalty_program == loyalty_program)
+			& (loyalty_point_entry.loyalty_points > 0)
+			& (
+				(loyalty_point_entry.expiry_date.isnull())
+				| (loyalty_point_entry.expiry_date >= frappe.utils.today())
+			)
+		)
+		.orderby(loyalty_point_entry.expiry_date)
+		.orderby(loyalty_point_entry.creation)
+	).run(as_dict=True)
+
+	return entries
+
+
+def check_customer_transaction_threshold(customer):
+
+	if not customer:
+		return True
+
+	loyalty_program = frappe.get_value(
+		"Customer",
+		customer,
+		"loyalty_program"
+	)
+	if not loyalty_program:
+		return True
+
+	threshold = frappe.db.get_value(
+		"Loyalty Program",
+		loyalty_program,
+		"custom_min_transactions_before_redemption"
+	)
+
+	if not threshold:
+		return True
+
+	transaction_count = frappe.db.count(
+		"Sales Invoice",
+		filters={
+			"customer": customer,
+			"docstatus": 1,
+			"is_pos": 1,
+			"is_return": 0,
+		},
+	)
+
+	return transaction_count >= int(threshold)
+
+
+def check_loyalty_redemption_cooldown(customer):
+	if not customer:
+		return True
+	
+	loyalty_program = frappe.db.get_value(
+		"Customer",
+		customer,
+		"loyalty_program"
+	)
+
+	if not loyalty_program:
+		return True
+
+	cooldown_hours = frappe.db.get_value(
+		"Loyalty Program",
+		loyalty_program,
+		"custom_cooldown_period_between_redemptions"
+	)
+
+	# 0 means no cooldown
+	if not cooldown_hours:
+		return True
+
+	last_entry = frappe.db.get_value(
+		"Loyalty Point Entry",
+		{
+			"customer": customer,
+			"loyalty_program": loyalty_program,
+			"loyalty_points": ["<", 0],
+		},
+		["name", "posting_date"],
+		order_by="posting_date desc, creation desc",
+		as_dict=True,
+	)
+
+	if not last_entry:
+		return True
+
+	last_redemption = get_datetime(last_entry.posting_date)
+	cooldown_until = last_redemption + timedelta(
+		hours=float(cooldown_hours)
+	)
+
+	return now_datetime() >= cooldown_until

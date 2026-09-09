@@ -68,6 +68,23 @@ V16_CUSTOM_FIELDS = {
 			"depends_on": "eval:doc.posa_allow_offline_mode",
 			"description": "Stop accepting offline sales once this many invoices are waiting to sync.",
 		},
+		{
+			"fieldname": "posa_invoice_naming_series",
+			"label": "POS Invoice Naming Series",
+			"fieldtype": "Select",
+			"insert_after": "warehouse",
+			"options": "",
+		},
+		{
+			"fieldname": "posa_allow_loyalty_redemption",
+			"label": "Allow Loyalty Redemption",
+			"fieldtype": "Check",
+			"insert_after": "posa_default_sales_order",
+			"default": "0",
+			"description": (
+				"Allow customers to redeem loyalty points for discounts on sales."
+			),
+		}
 	],
 }
 
