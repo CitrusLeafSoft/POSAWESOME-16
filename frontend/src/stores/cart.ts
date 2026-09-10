@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { applyLineDiscount, calculateTotals, lineAmount, type TaxRow } from "@/lib/totals";
 import { money, qty as roundQty, today, toNumber } from "@/lib/format";
 import { uid } from "@/lib/uid";
-import type { AppliedOffer, BatchInfo, CartItem, Coupon, CustomerInfo, Item, SerialInfo } from "@/types";
+import type { AppliedOffer, BatchInfo, CartItem, Coupon, CustomerInfo, Item, SerialInfo, VehicleDetail } from "@/types";
 import { useSessionStore } from "./session";
 import { useUiStore } from "./ui";
 
@@ -38,6 +38,8 @@ export const useCartStore = defineStore("cart", () => {
 	const deliveryDate = ref<string | null>(null);
 	const poNumber = ref<string>("");
 	const warrantyNumber = ref<string>("");
+	const vehicleDetailsEnabled = ref(false);
+	const vehicleDetails = ref<VehicleDetail[]>([]);
 	const notes = ref<string>("");
 	const shippingAddress = ref<string | null>(null);
 	const deliveryCharges = ref<string | null>(null);
@@ -548,6 +550,16 @@ export const useCartStore = defineStore("cart", () => {
 		markDirty();
 	}
 
+	function addVehicleRow() {
+		vehicleDetails.value = [...vehicleDetails.value, { posa_row_id: uid("veh") }];
+		markDirty();
+	}
+
+	function removeVehicleRow(rowId: string) {
+		vehicleDetails.value = vehicleDetails.value.filter((row) => row.posa_row_id !== rowId);
+		markDirty();
+	}
+
 	function removeItem(rowId: string) {
 		const line = items.value.find((item) => item.posa_row_id === rowId);
 		if (line?.posa_is_offer) {
@@ -604,6 +616,25 @@ export const useCartStore = defineStore("cart", () => {
 	}
 
 	/* ---------------------------------------------------------- persistence */
+	function toVehicleDetails(): Record<string, unknown>[] {
+		if (!vehicleDetailsEnabled.value) return [];
+		return vehicleDetails.value
+			.map((row) => ({
+				vehicle_type: row.vehicle_type || undefined,
+				vehicle_model: row.vehicle_model || undefined,
+				vehicle_mileage: row.vehicle_mileage || undefined,
+				vehicle_number: row.vehicle_number || undefined,
+				vehicle_category: row.vehicle_category || undefined,
+			}))
+			.filter(
+				(row) =>
+					row.vehicle_type ||
+					row.vehicle_model ||
+					row.vehicle_mileage ||
+					row.vehicle_number ||
+					row.vehicle_category,
+			);
+	}
 
 	/** The payload `update_invoice` expects. */
 	function toInvoicePayload(): Record<string, unknown> {
@@ -632,6 +663,7 @@ export const useCartStore = defineStore("cart", () => {
 			tc_name: profile?.tc_name,
 			po_no: poNumber.value || undefined,
 			custom_warranty_number: warrantyNumber.value || undefined,
+			custom_vehicle_details: toVehicleDetails(),
 			posa_notes: notes.value || undefined,
 			posa_delivery_date: deliveryDate.value ?? undefined,
 			shipping_address_name: shippingAddress.value ?? undefined,
@@ -745,6 +777,8 @@ export const useCartStore = defineStore("cart", () => {
 		notes.value = "";
 		poNumber.value = "";
 		warrantyNumber.value = "";
+		vehicleDetailsEnabled.value = false;
+		vehicleDetails.value = [];
 		dueDate.value = null;
 		deliveryDate.value = null;
 		shippingAddress.value = null;
@@ -776,6 +810,16 @@ export const useCartStore = defineStore("cart", () => {
 		notes.value = (doc.posa_notes as string) ?? "";
 		poNumber.value = (doc.po_no as string) ?? "";
 		warrantyNumber.value = (doc.custom_warranty_number as string) ?? "";
+		const vehicleRows = (doc.custom_vehicle_details as Record<string, unknown>[]) ?? [];
+		vehicleDetailsEnabled.value = vehicleRows.length > 0;
+		vehicleDetails.value = vehicleRows.map((row) => ({
+			posa_row_id: uid("veh"),
+			vehicle_type: (row.vehicle_type as string) ?? "",
+			vehicle_model: (row.vehicle_model as string) ?? "",
+			vehicle_mileage: (row.vehicle_mileage as string) ?? "",
+			vehicle_number: (row.vehicle_number as string) ?? "",
+			vehicle_category: (row.vehicle_category as string) ?? "",
+		}));
 		postingDate.value = (doc.posting_date as string) ?? today();
 		additionalDiscount.value = toNumber(doc.discount_amount);
 		additionalDiscountPercentage.value = toNumber(doc.additional_discount_percentage);
@@ -887,6 +931,7 @@ export const useCartStore = defineStore("cart", () => {
 
 	// Any structural change invalidates the saved draft.
 	watch(items, markDirty, { deep: true });
+	watch(vehicleDetails, markDirty, { deep: true });
 
 	return {
 		invoiceName,
@@ -900,6 +945,8 @@ export const useCartStore = defineStore("cart", () => {
 		deliveryDate,
 		poNumber,
 		warrantyNumber,
+		vehicleDetailsEnabled,
+		vehicleDetails,
 		notes,
 		shippingAddress,
 		deliveryCharges,
@@ -939,6 +986,8 @@ export const useCartStore = defineStore("cart", () => {
 		serialBatchOptions,
 		availableSerialsFor,
 		setNotes,
+		addVehicleRow,
+		removeVehicleRow,
 		removeItem,
 		setAdditionalDiscount,
 		maxLoyaltyAmount,

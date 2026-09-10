@@ -213,6 +213,15 @@ export interface Customer {
 	primary_address?: string | null;
 }
 
+export interface VehicleDetail {
+	posa_row_id: string;
+	vehicle_type?: string;
+	vehicle_model?: string;
+	vehicle_mileage?: string;
+	vehicle_number?: string;
+	vehicle_category?: string;
+}
+
 export interface CustomerInfo {
 	name: string;
 	customer_name: string;
