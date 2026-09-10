@@ -12,7 +12,7 @@ import {
 	Printer,
 	Plus,
 	RotateCcw,
-	Smartphone,
+	// Smartphone,
 	WalletCards,
 } from "lucide-vue-next";
 import { formatCurrency, formatDate, formatFloat, toNumber } from "@/lib/format";
@@ -50,7 +50,7 @@ const canUseCreditNotes = computed(
 function creditNoteAgainst(row: CreditNoteRow): string {
 	return row.return_against ?? "";
 }
-const mpesaEnabled = computed(() => !!session.profile?.posa_allow_mpesa_reconcile_payments);
+// const mpesaEnabled = computed(() => !!session.profile?.posa_allow_mpesa_reconcile_payments);
 /** Loyalty redemption shows whenever the customer carries a balance to spend. */
 const canRedeem = computed(
 	() =>
@@ -113,9 +113,9 @@ function print() {
 	ui.openModal("print", { invoiceName: name });
 }
 
-function openMpesa() {
-	ui.openModal("mpesa");
-}
+// function openMpesa() {
+// 	ui.openModal("mpesa");
+// }
 
 function openLoyaltyDetails() {
 	ui.openModal("loyaltyDetails");
@@ -377,7 +377,7 @@ function openLoyaltyDetails() {
 				</div>
 
 				<!-- M-Pesa: reconcile a transaction the customer has already sent -->
-				<button
+				<!-- <button
 					v-if="mpesaEnabled"
 					type="button"
 					class="flex w-full items-center gap-2 rounded-card border border-dashed border-success/50 bg-success-soft/30 p-2 text-left transition hover:border-success"
@@ -390,7 +390,7 @@ function openLoyaltyDetails() {
 						<span class="block text-sm font-medium">M-Pesa</span>
 						<span class="block text-[11px] text-subtle">Match a transaction the customer has paid</span>
 					</span>
-				</button>
+				</button> -->
 
 				<!-- Quick cash -->
 				<div>

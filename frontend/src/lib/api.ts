@@ -239,6 +239,12 @@ export const api = {
 	loyaltyPointsDetails: (customer: string) =>
 		call<unknown>(`${NS}.customer.get_loyalty_points_details`, { customer }),
 	salesPersons: () => call<unknown>(`${NS}.customer.get_sales_person_names`, {}, { method: "GET" }),
+	vehicleTypesModels: () =>
+		call<{ vehicle_types: { name: string }[]; vehicle_models: { name: string }[] }>(
+			`${NS}.customer.get_vehicle_types_models`,
+			{},
+			{ method: "GET" },
+		),
 
 	/* Invoice */
 	updateInvoice: (data: unknown) => call<unknown>(`${NS}.invoice_api.update_invoice`, { data }),

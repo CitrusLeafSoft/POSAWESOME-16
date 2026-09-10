@@ -515,17 +515,36 @@ def check_loyalty_redemption_cooldown(customer):
 			"loyalty_program": loyalty_program,
 			"loyalty_points": ["<", 0],
 		},
-		["name", "posting_date"],
-		order_by="posting_date desc, creation desc",
+		["name", "creation"],
+		order_by="creation desc",
 		as_dict=True,
 	)
 
 	if not last_entry:
 		return True
 
-	last_redemption = get_datetime(last_entry.posting_date)
+	last_redemption = get_datetime(last_entry.creation)
 	cooldown_until = last_redemption + timedelta(
 		hours=float(cooldown_hours)
 	)
 
 	return now_datetime() >= cooldown_until
+
+
+@frappe.whitelist()
+def get_vehicle_types_models():
+	vehicle_types = frappe.get_all(
+		"Vehicle Type",
+		fields=["name"],
+		order_by="name",
+		limit_page_length=0,
+	)
+
+	vehicle_models = frappe.get_all(
+		"Vehicle Model Number",
+		fields=["name"],
+		order_by="name",
+		limit_page_length=0,
+	)
+
+	return {"vehicle_types": vehicle_types, "vehicle_models": vehicle_models}
