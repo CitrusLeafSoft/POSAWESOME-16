@@ -548,3 +548,36 @@ def get_vehicle_types_models():
 	)
 
 	return {"vehicle_types": vehicle_types, "vehicle_models": vehicle_models}
+
+
+@frappe.whitelist()
+def ensure_vehicle_type_model(vehicle_types=None, vehicle_models=None):
+	types = _as_list(vehicle_types)
+	models = _as_list(vehicle_models)
+	created = {"vehicle_types": [], "vehicle_models": []}
+
+	for vehicle_type in types:
+		vehicle_type = (vehicle_type or "").strip()
+		if vehicle_type and not frappe.db.exists("Vehicle Type", vehicle_type):
+			frappe.get_doc({"doctype": "Vehicle Type", "vehicle_type": vehicle_type}).insert(
+				ignore_permissions=True
+			)
+			created["vehicle_types"].append(vehicle_type)
+
+	for vehicle_model in models:
+		vehicle_model = (vehicle_model or "").strip()
+		if vehicle_model and not frappe.db.exists("Vehicle Model Number", vehicle_model):
+			frappe.get_doc(
+				{"doctype": "Vehicle Model Number", "vehicle_model_number": vehicle_model}
+			).insert(ignore_permissions=True)
+			created["vehicle_models"].append(vehicle_model)
+
+	return {"created": created, **get_vehicle_types_models()}
+
+
+def _as_list(value):
+	if value is None:
+		return []
+	if isinstance(value, (list, tuple)):
+		return value
+	return [value]

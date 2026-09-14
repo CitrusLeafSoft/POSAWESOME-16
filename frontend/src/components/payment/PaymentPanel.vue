@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Tender screen. Big targets, tabular numbers, and one obvious primary action. */
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import {
 	ArrowLeft,
 	Banknote,
@@ -12,10 +12,11 @@ import {
 	Printer,
 	Plus,
 	RotateCcw,
-	// Smartphone,
+	Smartphone,
 	WalletCards,
 } from "lucide-vue-next";
 import { formatCurrency, formatDate, formatFloat, toNumber } from "@/lib/format";
+import { api } from "@/lib/api";
 import { usePaymentsStore } from "@/stores/payments";
 import { useCartStore } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
@@ -30,7 +31,7 @@ const offers = useOffersStore();
 const session = useSessionStore();
 
 /** Round-number shortcuts a cashier actually reaches for. */
-const QUICK = [5, 10, 20, 50, 100, 200, 500];
+// const QUICK = [5, 10, 20, 50, 100, 200, 500];
 
 const done = computed(() => !!payments.lastInvoice);
 /** A sale parked on the terminal: real to the customer, not yet on the server. */
@@ -60,6 +61,10 @@ const canRedeem = computed(
 );
 /** The Mode of Payment treated as credit (its tender stays outstanding). */
 const CREDIT_MODE = "Credit";
+/** Mode of Payment for EDC machine tenders, shown read-only with its total. */
+const PAYTM_MODE = "Paytm Machine";
+/** Tender modes the cashier can type into — Paytm machine is handled separately. */
+const manualRows = computed(() => payments.rows.filter((row) => row.mode_of_payment !== PAYTM_MODE));
 
 // Totals can settle after entry (taxes arriving with the draft save); while the
 // cashier has not touched the amounts, keep tender pinned to what is owed.
@@ -113,6 +118,15 @@ function print() {
 	ui.openModal("print", { invoiceName: name });
 }
 
+/** Track when the cashier is typing in the Paytm box so the auto-refill stands down. */
+function onPaytmFocus() {
+	payments.setPaytmEditing(true);
+}
+
+function onPaytmBlur() {
+	payments.setPaytmEditing(false);
+}
+
 // function openMpesa() {
 // 	ui.openModal("mpesa");
 // }
@@ -120,16 +134,104 @@ function print() {
 function openLoyaltyDetails() {
 	ui.openModal("loyaltyDetails");
 }
+
+/** Amount typed into the Paytm machine box, and whether a request is in flight. */
+const paytmProcessing = ref(false);
+const paytmStatus = ref("");
+/** Seconds left before the Paytm request is abandoned, shown while in flight. */
+const paytmRemaining = ref(0);
+let paytmTimer: number | undefined;
+
+/**
+ * Fire a sale request at the Paytm EDC machine and poll the status enquiry until
+ * the machine confirms the money. On success the amount is added to the Paytm
+ * Machine tender row, which flows onto the Sales Invoice and back into the panel.
+ */
+async function payByPaytm() {
+	const amount = toNumber(payments.paytmBox);
+	if (!amount || amount <= 0) {
+		ui.warn("Enter an amount", "Type how much to take through the Paytm machine.");
+		return;
+	}
+	// The Paytm machine cannot take more than is still owed on this sale.
+	const outstanding = payments.outstanding;
+	if (amount > outstanding) {
+		ui.warn(
+			"Amount exceeds the balance",
+			`Only ${formatCurrency(outstanding)} is still owed on this sale.`,
+		);
+		return;
+	}
+	paytmProcessing.value = true;
+	paytmStatus.value = "Contacting Paytm machine…";
+	try {
+		// Make sure there is a draft invoice to record the transaction against.
+		let invoiceName: string | undefined = cart.invoiceName ?? undefined;
+		if (!invoiceName) {
+			const draft = await cart.saveDraft();
+			invoiceName = (draft?.name as string) ?? undefined;
+		}
+
+		const initiated = (await api.initiatePaytmPayment(amount, invoiceName)) as Record<string, unknown>;
+		if (!initiated.payment_status) {
+			throw new Error((initiated.message as string) || "Could not reach the Paytm machine.");
+		}
+		const refId = initiated.merchant_transaction_id as string;
+		const txnDatetime = initiated.transaction_datetime as string;
+
+		// Poll the machine until it confirms, declines, or we give up (~120s).
+		const deadline = Date.now() + 120_000;
+		paytmRemaining.value = Math.ceil((deadline - Date.now()) / 1000);
+		if (paytmTimer !== undefined) window.clearInterval(paytmTimer);
+		paytmTimer = window.setInterval(() => {
+			const left = Math.ceil((deadline - Date.now()) / 1000);
+			paytmRemaining.value = Math.max(left, 0);
+			if (left <= 0 && paytmTimer !== undefined) {
+				window.clearInterval(paytmTimer);
+				paytmTimer = undefined;
+			}
+		}, 1000);
+		for (; ;) {
+			await new Promise((resolve) => setTimeout(resolve, 3000));
+			const status = (await api.checkPaytmPaymentStatus(refId, txnDatetime, invoiceName, amount)) as Record<
+				string,
+				unknown
+			>;
+			if (status.verified) {
+				payments.applyPaytmPayment(amount);
+				paytmStatus.value = "";
+				payments.syncPaytmBox();
+				ui.success("Paytm payment received", `${formatCurrency(amount)} added to this sale`);
+				return;
+			}
+			if (status.status === "FAILED" || status.status === "CHECKSUM_FAILED" || status.status === "HTTP_ERROR") {
+				throw new Error((status.message as string) || "Paytm machine declined the payment.");
+			}
+			paytmStatus.value = "Waiting for the customer to pay…";
+			if (Date.now() > deadline) {
+				throw new Error("Timed out waiting for the Paytm machine.");
+			}
+		}
+	} catch (error) {
+		ui.fail("Paytm payment failed", error instanceof Error ? error.message : String(error));
+	} finally {
+		if (paytmTimer !== undefined) {
+			window.clearInterval(paytmTimer);
+			paytmTimer = undefined;
+		}
+		paytmRemaining.value = 0;
+		paytmProcessing.value = false;
+		paytmStatus.value = "";
+	}
+}
 </script>
 
 <template>
 	<section class="panel flex h-full min-h-0 flex-col overflow-hidden">
 		<!-- Success state -->
 		<div v-if="done" class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-			<span
-				class="grid size-16 place-items-center rounded-full animate-pop-in"
-				:class="queued ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success'"
-			>
+			<span class="grid size-16 place-items-center rounded-full animate-pop-in"
+				:class="queued ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success'">
 				<CloudOff v-if="queued" class="size-8" />
 				<CheckCircle2 v-else class="size-8" />
 			</span>
@@ -152,21 +254,16 @@ function openLoyaltyDetails() {
 			</div>
 
 			<div class="mt-2 flex w-full max-w-xs flex-col gap-2">
-				<button
-					type="button"
+				<button type="button"
 					class="flex h-11 items-center justify-center gap-2 rounded-card bg-accent font-semibold text-accent-fg transition hover:bg-accent-hover"
-					@click="nextSale"
-				>
+					@click="nextSale">
 					<Plus class="size-4" />
 					New sale
 				</button>
-				<button
-					type="button"
+				<button type="button"
 					class="flex h-11 items-center justify-center gap-2 rounded-card border border-line font-medium text-muted transition hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-45"
-					:disabled="queued"
-					:title="queued ? 'Available once the sale has been sent' : undefined"
-					@click="print"
-				>
+					:disabled="queued" :title="queued ? 'Available once the sale has been sent' : undefined"
+					@click="print">
 					<Printer class="size-4" />
 					Print receipt
 				</button>
@@ -176,12 +273,9 @@ function openLoyaltyDetails() {
 		<!-- Tender state -->
 		<template v-else>
 			<header class="flex shrink-0 items-center gap-2 border-b border-line p-3">
-				<button
-					type="button"
+				<button type="button"
 					class="grid size-9 place-items-center rounded-card text-muted transition hover:bg-surface-2 hover:text-fg"
-					aria-label="Back to catalog"
-					@click="back"
-				>
+					aria-label="Back to catalog" @click="back">
 					<ArrowLeft class="size-4.5" />
 				</button>
 				<h2 class="text-sm font-semibold">{{ isReturn ? "Refund" : "Payment" }}</h2>
@@ -189,20 +283,15 @@ function openLoyaltyDetails() {
 					<span class="block text-[11px] uppercase tracking-wide text-subtle">
 						{{ isReturn ? "Refund due" : "Due" }}
 					</span>
-					<span
-						class="block text-lg font-bold tnum leading-tight"
-						:class="isReturn && 'text-danger'"
-						>{{ formatCurrency(Math.abs(payments.payable)) }}</span
-					>
+					<span class="block text-lg font-bold tnum leading-tight" :class="isReturn && 'text-danger'">{{
+						formatCurrency(Math.abs(payments.payable)) }}</span>
 				</span>
 			</header>
 
 			<div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
 				<!-- Loyalty redemption — points settle part of the total before cash -->
-				<div
-					v-if="canRedeem"
-					class="flex items-center gap-2 rounded-card border border-dashed border-violet/40 bg-violet-soft/40 p-2"
-				>
+				<div v-if="canRedeem"
+					class="flex items-center gap-2 rounded-card border border-dashed border-violet/40 bg-violet-soft/40 p-2">
 					<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-soft text-violet">
 						<Coins class="size-4" />
 					</span>
@@ -214,51 +303,106 @@ function openLoyaltyDetails() {
 						</span>
 					</label>
 					<span>
-						<button  @click="openLoyaltyDetails" class="px-1.5 py-1 text-[11px] font-semibold text-violet hover:underline">
+						<button @click="openLoyaltyDetails"
+							class="px-1.5 py-1 text-[11px] font-semibold text-violet hover:underline">
 							See details
 						</button>
 					</span>
-					<input
-						id="loyalty-redeem"
-						:value="cart.loyaltyAmount || ''"
-						type="text"
-						inputmode="decimal"
+					<input id="loyalty-redeem" :value="cart.loyaltyAmount || ''" type="text" inputmode="decimal"
 						placeholder="0.00"
 						class="h-10 w-28 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-accent focus:ring-0"
-						@focus="($event.target as HTMLInputElement).select()"
-						@change="commitRedemption($event)"
-					/>
+						@focus="($event.target as HTMLInputElement).select()" @change="commitRedemption($event)" />
 				</div>
 				<!-- Modes -->
 				<div class="space-y-2">
-					<div
-						v-for="row in payments.rows"
-						:key="row.mode_of_payment"
-						class="flex items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-xs transition focus-within:border-accent"
-					>
-						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted">
-							<Banknote class="size-4" />
-						</span>
-						<label class="min-w-0 flex-1 truncate text-sm font-medium" :for="`pay-${row.mode_of_payment}`">
-							{{ row.mode_of_payment }}
-							<span
-								v-if="row.mode_of_payment === CREDIT_MODE"
-								class="ms-1 rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+					<template v-for="row in manualRows" :key="row.mode_of_payment">
+						<div
+							v-if="!isReturn || row.mode_of_payment !== CREDIT_MODE"
+							class="flex items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-xs transition focus-within:border-accent"
+						>
+							<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted">
+								<Banknote class="size-4" />
+							</span>
+
+							<label
+								class="min-w-0 flex-1 truncate text-sm font-medium"
+								:for="`pay-${row.mode_of_payment}`"
 							>
-								Credit
+								{{ row.mode_of_payment }}
+
+								<span
+									v-if="row.mode_of_payment === CREDIT_MODE"
+									class="ms-1 rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+								>
+									Credit
+								</span>
+							</label>
+
+							<input
+								:id="`pay-${row.mode_of_payment}`"
+								:value="row.amount ? Math.abs(row.amount) : ''"
+								type="text"
+								inputmode="decimal"
+								placeholder="0.00"
+								class="h-10 w-32 rounded-card border-line bg-surface-2 text-right text-base font-semibold tnum focus:border-accent focus:ring-0"
+								@focus="($event.target as HTMLInputElement).select()"
+								@input="payments.setAmount(
+									row.mode_of_payment,
+									toNumber(($event.target as HTMLInputElement).value)
+								)"
+							/>
+						</div>
+					</template>
+
+					<div
+						v-if="payments.paytmTotal > 0"
+						class="flex items-center gap-2 rounded-card border border-dashed border-accent/50 bg-accent-soft/30 p-2"
+					>
+						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+							<Smartphone class="size-4" />
+						</span>
+
+						<label class="min-w-0 flex-1 truncate text-sm font-medium">
+							Paytm Machine
+							<span
+								class="ms-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent"
+							>
+								Paid
 							</span>
 						</label>
-						<input
-							:id="`pay-${row.mode_of_payment}`"
-							:value="row.amount ? Math.abs(row.amount) : ''"
-							type="text"
-							inputmode="decimal"
-							placeholder="0.00"
-							class="h-10 w-32 rounded-card border-line bg-surface-2 text-right text-base font-semibold tnum focus:border-accent focus:ring-0"
-							@focus="($event.target as HTMLInputElement).select()"
-							@input="payments.setAmount(row.mode_of_payment, toNumber(($event.target as HTMLInputElement).value))"
-						/>
+
+						<span class="text-base font-bold tnum text-accent">
+							{{ formatCurrency(payments.paytmTotal) }}
+						</span>
 					</div>
+				</div>
+
+				<!-- Paytm Machine: take a card/QR payment on the EDC terminal. The amount
+				     stays here until the machine confirms, then it lands on the ticket. -->
+				<div v-if="!isReturn">
+					<p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle">Paytm Machine</p>
+					<div
+						class="flex items-center gap-2 rounded-card border border-dashed border-accent/50 bg-accent-soft/30 p-2">
+						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+							<Smartphone class="size-4" />
+						</span>
+<input v-model="payments.paytmBox" type="text" inputmode="decimal" placeholder="0.00"
+						class="h-10 w-32 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-accent focus:ring-0"
+						@focus="($event.target as HTMLInputElement).select(); onPaytmFocus()" @blur="onPaytmBlur()"
+						@keydown.enter.prevent="payByPaytm" />
+						<button type="button"
+							class="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-card bg-accent px-3 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+							:disabled="paytmProcessing" @click="payByPaytm">
+							<Loader2 v-if="paytmProcessing" class="size-4 animate-spin" />
+							<span v-else>Pay</span>
+						</button>
+					</div>
+					<p v-if="paytmStatus" class="mt-1 text-[11px] text-muted">
+						{{ paytmStatus }}
+						<!-- <span v-if="paytmProcessing && paytmRemaining > 0" class="ms-1 font-semibold tnum text-accent">
+						{{ paytmRemaining }}s left
+					</span> -->
+					</p>
 				</div>
 
 				<!-- Customer credit — unapplied credit notes and advances on the account -->
@@ -274,53 +418,39 @@ function openLoyaltyDetails() {
 								{{ formatCurrency(payments.creditApplied) }} applied
 							</p>
 						</div>
-						<button
-							type="button"
+						<button type="button"
 							class="h-8 rounded-card border border-info px-2.5 text-xs font-semibold text-info transition hover:opacity-85"
-							@click="payments.applyMaxCredit()"
-						>
+							@click="payments.applyMaxCredit()">
 							Use max
 						</button>
-						<button
-							v-if="payments.creditApplied > 0"
-							type="button"
+						<button v-if="payments.creditApplied > 0" type="button"
 							class="h-8 rounded-card px-2 text-xs font-medium text-subtle transition hover:text-danger"
-							@click="payments.clearCredit()"
-						>
+							@click="payments.clearCredit()">
 							Clear
 						</button>
 					</div>
 
-					<div
-						v-for="row in payments.credit"
-						:key="row.credit_origin"
-						class="flex items-center gap-2 ps-11"
-					>
+					<div v-for="row in payments.credit" :key="row.credit_origin" class="flex items-center gap-2 ps-11">
 						<label class="min-w-0 flex-1 truncate text-xs" :for="`credit-${row.credit_origin}`">
 							<span class="font-medium">{{ row.type }}</span>
 							<span class="ms-1 font-mono text-subtle">{{ row.credit_origin }}</span>
 							<span class="ms-1 tnum text-subtle">· {{ formatCurrency(row.total_credit) }}</span>
 						</label>
-						<input
-							:id="`credit-${row.credit_origin}`"
-							:value="row.credit_to_redeem || ''"
-							type="text"
-							inputmode="decimal"
-							placeholder="0.00"
+						<input :id="`credit-${row.credit_origin}`" :value="row.credit_to_redeem || ''" type="text"
+							inputmode="decimal" placeholder="0.00"
 							class="h-9 w-24 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-info focus:ring-0"
 							@focus="($event.target as HTMLInputElement).select()"
-							@change="payments.setCredit(row.credit_origin, toNumber(($event.target as HTMLInputElement).value))"
-						/>
+							@change="payments.setCredit(row.credit_origin, toNumber(($event.target as HTMLInputElement).value))" />
 					</div>
 				</div>
+
+				
 
 				<!-- Credit notes — returned invoices the customer can spend. Separate
 				     from the advance credit above: checking a note applies its whole
 				     remaining balance, and the cash due drops at once. -->
-				<div
-					v-if="canUseCreditNotes"
-					class="space-y-2 rounded-card border border-success/40 bg-success-soft/30 p-2"
-				>
+				<div v-if="canUseCreditNotes"
+					class="space-y-2 rounded-card border border-success/40 bg-success-soft/30 p-2">
 					<div class="flex items-center gap-2">
 						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-success-soft text-success">
 							<RotateCcw class="size-4" />
@@ -332,28 +462,17 @@ function openLoyaltyDetails() {
 								{{ formatCurrency(payments.creditNoteApplied) }} applied
 							</p>
 						</div>
-						<button
-							v-if="payments.creditNoteApplied > 0"
-							type="button"
+						<button v-if="payments.creditNoteApplied > 0" type="button"
 							class="h-8 rounded-card px-2 text-xs font-medium text-subtle transition hover:text-danger"
-							@click="payments.clearCreditNotes()"
-						>
+							@click="payments.clearCreditNotes()">
 							Clear
 						</button>
 					</div>
 
-					<div
-						v-for="row in payments.creditNotes"
-						:key="row.name"
-						class="flex items-start gap-2 ps-11"
-					>
-						<input
-							:id="`credit-note-${row.name}`"
-							type="checkbox"
-							class="mt-1 size-4 shrink-0 rounded border-line accent-accent"
-							:checked="!!row.selected"
-							@change="payments.toggleCreditNote(row.name, ($event.target as HTMLInputElement).checked)"
-						/>
+					<div v-for="row in payments.creditNotes" :key="row.name" class="flex items-start gap-2 ps-11">
+						<input :id="`credit-note-${row.name}`" type="checkbox"
+							class="mt-1 size-4 shrink-0 rounded border-line accent-accent" :checked="!!row.selected"
+							@change="payments.toggleCreditNote(row.name, ($event.target as HTMLInputElement).checked)" />
 						<label class="min-w-0 flex-1 cursor-pointer" :for="`credit-note-${row.name}`">
 							<span class="flex items-center gap-1.5 text-xs font-medium">
 								<span class="truncate">Credit note</span>
@@ -393,34 +512,26 @@ function openLoyaltyDetails() {
 				</button> -->
 
 				<!-- Quick cash -->
-				<div>
+				<!-- <div>
 					<p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle">Quick add</p>
 					<div class="flex flex-wrap gap-1.5">
-						<button
-							v-for="amount in QUICK"
-							:key="amount"
-							type="button"
+						<button v-for="amount in QUICK" :key="amount" type="button"
 							class="h-9 min-w-14 rounded-card border border-line bg-surface px-3 text-sm font-semibold tnum shadow-xs transition hover:border-accent hover:text-accent"
-							@click="payments.addAmount(payments.rows.find((r) => r.default)?.mode_of_payment ?? payments.rows[0]?.mode_of_payment ?? '', amount)"
-						>
+							@click="payments.addAmount(payments.rows.find((r) => r.default)?.mode_of_payment ?? payments.rows[0]?.mode_of_payment ?? '', amount)">
 							+{{ amount }}
 						</button>
-						<button
-							type="button"
+						<button type="button"
 							class="h-9 rounded-card border border-accent bg-accent-soft px-3 text-sm font-semibold text-accent transition hover:opacity-85"
-							@click="payments.tenderExact()"
-						>
+							@click="payments.tenderExact()">
 							Exact
 						</button>
-						<button
-							type="button"
+						<button type="button"
 							class="h-9 rounded-card border border-line px-3 text-sm font-medium text-muted transition hover:bg-surface-2"
-							@click="payments.clear()"
-						>
+							@click="payments.clear()">
 							Clear
 						</button>
 					</div>
-				</div>
+				</div> -->
 			</div>
 
 			<footer class="shrink-0 space-y-2 border-t border-line p-3">
@@ -434,7 +545,8 @@ function openLoyaltyDetails() {
 				</div>
 				<div v-if="payments.creditNoteApplied > 0 && !isReturn" class="flex justify-between text-sm">
 					<span class="text-success">By credit note</span>
-					<span class="font-semibold tnum text-success">−{{ formatCurrency(payments.creditNoteApplied) }}</span>
+					<span class="font-semibold tnum text-success">−{{ formatCurrency(payments.creditNoteApplied)
+						}}</span>
 				</div>
 				<div class="flex justify-between text-sm">
 					<span :class="payments.outstanding > 0 ? 'text-danger' : 'text-muted'">
@@ -448,21 +560,14 @@ function openLoyaltyDetails() {
 									: "Change"
 						}}
 					</span>
-					<span
-						class="font-bold tnum"
-						:class="payments.outstanding > 0 ? 'text-danger' : 'text-success'"
-					>
+					<span class="font-bold tnum" :class="payments.outstanding > 0 ? 'text-danger' : 'text-success'">
 						{{ formatCurrency(payments.outstanding > 0 ? payments.outstanding : payments.change) }}
 					</span>
 				</div>
 
-				<button
-					type="button"
+				<button type="button"
 					class="flex h-13 w-full items-center justify-center gap-2 rounded-card text-base font-semibold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-subtle disabled:shadow-none"
-					:class="isReturn ? 'bg-danger' : 'bg-success'"
-					:disabled="!payments.canSubmit"
-					@click="complete"
-				>
+					:class="isReturn ? 'bg-danger' : 'bg-success'" :disabled="!payments.canSubmit" @click="complete">
 					<Loader2 v-if="payments.submitting" class="size-5 animate-spin" />
 					<Check v-else class="size-5" />
 					{{
