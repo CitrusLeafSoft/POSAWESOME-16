@@ -245,6 +245,15 @@ export const api = {
 			{},
 			{ method: "GET" },
 		),
+	ensureVehicleTypeModel: (vehicle_types?: string[], vehicle_models?: string[]) =>
+		call<{
+			created: { vehicle_types: string[]; vehicle_models: string[] };
+			vehicle_types: { name: string }[];
+			vehicle_models: { name: string }[];
+		}>(`${NS}.customer.ensure_vehicle_type_model`, {
+			vehicle_types: vehicle_types || [],
+			vehicle_models: vehicle_models || [],
+		}),
 
 	/* Invoice */
 	updateInvoice: (data: unknown) => call<unknown>(`${NS}.invoice_api.update_invoice`, { data }),
@@ -300,4 +309,21 @@ export const api = {
 
 	/* Offline sync */
 	syncInvoices: (batch: unknown) => call<unknown>(`${NS}.offline.sync_invoices`, { batch }, { ignoreOffline: true }),
+
+	/* Paytm EDC machine */
+	initiatePaytmPayment: (amount: number, sales_invoice?: string) =>
+		call<Record<string, unknown>>(
+			`posawesome.posawesome.overrides.paytm_payment_integration.initiate_paytm_payment`,
+			{ amount, sales_invoice },
+		),
+	checkPaytmPaymentStatus: (
+		merchant_transaction_id: string,
+		transaction_datetime: string,
+		sales_invoice?: string,
+		amount?: number,
+	) =>
+		call<Record<string, unknown>>(
+			`posawesome.posawesome.overrides.paytm_payment_integration.check_paytm_payment_status`,
+			{ merchant_transaction_id, transaction_datetime, sales_invoice, amount },
+		),
 };

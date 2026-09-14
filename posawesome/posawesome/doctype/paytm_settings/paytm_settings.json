@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "creation": "2026-09-10 17:44:09.561486",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "paytm_mid",
+  "paytm_tid",
+  "merchant_key",
+  "channel_id",
+  "device_id",
+  "sale_request_api_url",
+  "status_enquiry_api_url",
+  "version"
+ ],
+ "fields": [
+  {
+   "fieldname": "paytm_mid",
+   "fieldtype": "Data",
+   "label": "Paytm MID"
+  },
+  {
+   "fieldname": "paytm_tid",
+   "fieldtype": "Data",
+   "label": "Paytm TID"
+  },
+  {
+   "fieldname": "merchant_key",
+   "fieldtype": "Data",
+   "label": "Merchant key"
+  },
+  {
+   "fieldname": "channel_id",
+   "fieldtype": "Data",
+   "label": "Channel ID"
+  },
+  {
+   "fieldname": "device_id",
+   "fieldtype": "Data",
+   "label": "Device ID"
+  },
+  {
+   "fieldname": "sale_request_api_url",
+   "fieldtype": "Data",
+   "label": "Sale Request API URL"
+  },
+  {
+   "fieldname": "status_enquiry_api_url",
+   "fieldtype": "Data",
+   "label": "Status Enquiry API URL"
+  },
+  {
+   "fieldname": "version",
+   "fieldtype": "Data",
+   "label": "Version"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-10 17:54:19.015504",
+ "modified_by": "Administrator",
+ "module": "POSAwesome",
+ "name": "Paytm Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

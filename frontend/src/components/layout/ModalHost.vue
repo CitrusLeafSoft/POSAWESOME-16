@@ -52,6 +52,7 @@ const registry: Record<string, Component> = {
 	variants: lazy(() => import("@/components/pos/VariantsModal.vue")),
 	customer: lazy(() => import("@/components/customer/CustomerFormModal.vue")),
 	invoiceDetails: lazy(() => import("@/components/cart/InvoiceDetailsModal.vue")),
+	vehicleDetails: lazy(() => import("@/components/cart/VehicleDetailsModal.vue")),
 	lineDetails: lazy(() => import("@/components/cart/CartLineDetailsModal.vue")),
 	serialBatch: lazy(() => import("@/components/cart/SerialBatchPickerModal.vue")),
 	mpesa: lazy(() => import("@/components/payment/MpesaModal.vue")),

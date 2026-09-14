@@ -2,6 +2,7 @@
 /** The invoice: who it is for, what is on it, and what it comes to. */
 import { computed } from "vue";
 import {
+	CarFront,
 	ClipboardList,
 	CreditCard,
 	// FileClock,
@@ -148,6 +149,13 @@ function abandonReturn() {
 					@click="ui.openModal('orders')"
 				>
 					<ClipboardList class="size-3.5" /> Orders
+				</button>
+				<button
+					type="button"
+					class="inline-flex shrink-0 items-center gap-1.5 rounded-card px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-fg"
+					@click="ui.openModal('vehicleDetails')"
+				>
+					<CarFront class="size-3.5" /> Vehicle
 				</button>
 				<button
 					type="button"

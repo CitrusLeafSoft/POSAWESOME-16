@@ -55,7 +55,7 @@ function pos_credit_reason_html(frm, state) {
     var d = frm.doc;
 
     if (state === POS_CREDIT_PENDING_STATE) {
-        var outstanding = flt(d.grand_total) - flt(d.paid_amount);
+        var outstanding = flt(d.outstanding_amount);
         return (
             '<div class="alert alert-warning pos-credit-banner" role="alert">' +
                 '<i class="fa fa-info-circle" aria-hidden="true"></i> ' +

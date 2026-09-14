@@ -6,7 +6,7 @@
  * submit so no component has to know the invoice payload shape.
  */
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { api } from "@/lib/api";
 import { money, toNumber } from "@/lib/format";
 import type { CreditNoteRow, CreditRow, PaymentMethod } from "@/types";
@@ -43,12 +43,25 @@ export const usePaymentsStore = defineStore("payments", () => {
 	/** The invoice that was just completed, for the success panel and reprint. */
 	const lastInvoice = ref<Record<string, unknown> | null>(null);
 
+	/** Each successful Paytm machine payment on this sale, kept individually so
+	 *  the invoice's payments table gets one row per payment. */
+	const paytmPayments = ref<number[]>([]);
+	/** The amount shown in the Paytm machine input box. Owned here so the panel
+	 *  can bind to it directly, and so auto-tender can route the remaining
+	 *  balance to the machine instead of the profile's default mode. */
+	const paytmBox = ref("");
+	/** True while the cashier is actually typing in the Paytm box, so the auto
+	 *  refill stands down instead of fighting the keypad. */
+	const paytmEditing = ref(false);
+
 	/** +1 on a sale, -1 on a return. Money flows the other way on a credit note,
 	 *  so every comparison below has to be taken relative to this. */
 	const sign = computed(() => (cart.isReturn ? -1 : 1));
 
 	/** The Mode of Payment whose tender is treated as credit, not cash taken. */
 	const CREDIT_MODE = "Credit";
+	/** Mode of Payment used for Paytm EDC machine tenders. */
+	const PAYTM_MODE = "Paytm Machine";
 
 	/** A tender row routed to the credit mode is credit — it stays outstanding and
 	 *  is never booked as a payment, so the invoice can go through approval. */
@@ -56,10 +69,16 @@ export const usePaymentsStore = defineStore("payments", () => {
 		return row.mode_of_payment === CREDIT_MODE;
 	}
 
-	/** Money actually taken from the customer — credit-mode lines are excluded. */
+	/** Money actually taken from the customer — credit-mode lines are excluded,
+	 *  and Paytm machine tenders are tracked separately below. */
+	const paytmTotal = computed(() =>
+		money(paytmPayments.value.reduce((sum, amount) => sum + toNumber(amount), 0)),
+	);
 	const paid = computed(() =>
 		money(
-			rows.value.filter((row) => !isCreditRow(row)).reduce((sum, row) => sum + toNumber(row.amount), 0),
+			rows.value
+				.filter((row) => !isCreditRow(row) && row.mode_of_payment !== PAYTM_MODE)
+				.reduce((sum, row) => sum + toNumber(row.amount), 0) + paytmTotal.value,
 		),
 	);
 	/** The value placed on the customer's credit instead of being paid (sales only). */
@@ -113,6 +132,14 @@ export const usePaymentsStore = defineStore("payments", () => {
 		money(sign.value * (payable.value - paid.value - creditTendered.value)) <= 0,
 	);
 
+    /** What the Paytm machine still has to collect on this sale: everything the
+	 *  other modes and any already-confirmed machine tenders leave unpaid. This
+	 *  is what the Paytm input box shows by default and keeps refilled as the
+	 *  cashier enters other modes. */
+    const paytmDue = computed(() =>
+		cart.isReturn ? 0 : money(Math.max(payable.value - paid.value - creditTendered.value, 0)),
+	);
+
     const canSubmit = computed(
         () =>
 			!cart.isEmpty &&
@@ -146,6 +173,9 @@ export const usePaymentsStore = defineStore("payments", () => {
 		credit.value = [];
 		creditNotes.value = [];
 		lastInvoice.value = null;
+		paytmPayments.value = [];
+		paytmBox.value = "";
+		paytmEditing.value = false;
 	}
 
 	/**
@@ -280,10 +310,22 @@ export const usePaymentsStore = defineStore("payments", () => {
 	}
 
 	/** The cashier always types a positive magnitude; direction comes from the sale. */
+	/** How much of `mode` the cashier can still enter before the sale is covered,
+	 *  given what the other modes and the Paytm machine have already taken. This
+	 *  keeps the amounts across modes balanced so the ticket never over-tenders. */
+	function remainingFor(mode: string): number {
+		if (cart.isReturn) return Math.abs(payable.value);
+		const others = rows.value
+			.filter((entry) => entry.mode_of_payment !== mode)
+			.reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+		return money(Math.max(payable.value - paytmTotal.value - others, 0));
+	}
+
 	function setAmount(mode: string, value: number) {
 		const row = rows.value.find((entry) => entry.mode_of_payment === mode);
 		if (!row) return;
-		row.amount = money(sign.value * Math.max(Math.abs(toNumber(value)), 0));
+		const magnitude = Math.max(Math.abs(toNumber(value)), 0);
+		row.amount = money(sign.value * Math.min(magnitude, remainingFor(mode)));
 		touched.value = true;
 	}
 
@@ -292,37 +334,84 @@ export const usePaymentsStore = defineStore("payments", () => {
 		const row = rows.value.find((entry) => entry.mode_of_payment === mode);
 		if (!row) return;
 		const magnitude = Math.max(Math.abs(row.amount) + Math.abs(delta), 0);
-		row.amount = money(sign.value * magnitude);
+		row.amount = money(sign.value * Math.min(magnitude, remainingFor(mode)));
 		touched.value = true;
 	}
 	function balanceTender() {
-		const target =
-			rows.value.find((row) => row.default) ??
-			rows.value.find((row) => row.amount) ??
-			rows.value[0];
-		if (!target) return;
-		const entered = rows.value
-			.filter((row) => row.mode_of_payment !== target.mode_of_payment)
-			.reduce((sum, row) => sum + toNumber(row.amount), 0);
-		// Signed, not clamped: refunds have to be able to go negative.
-		target.amount = money(payable.value - entered);
+		if (cart.isReturn) {
+			const target =
+				rows.value.find((row) => row.default) ??
+				rows.value.find((row) => row.amount) ??
+				rows.value[0];
+			if (!target) return;
+			const entered = rows.value
+				.filter((row) => row.mode_of_payment !== target.mode_of_payment)
+				.reduce((sum, row) => sum + toNumber(row.amount), 0);
+			// Paytm machine tenders are already taken and live outside the rows.
+			// Signed, not clamped: refunds have to be able to go negative.
+			target.amount = money(payable.value - paytmTotal.value - entered);
+			return;
+		}
+		// On a sale the balance lives in the Paytm machine box — the rows keep
+		// exactly what the cashier typed, and the machine picks up the rest.
+		syncPaytmBox();
 	}
-	/** Drop the whole balance onto one mode — the common single-tender case. */
+	/** Drop the whole balance onto one mode — the common single-tender case.
+	 *
+	 *  On a sale the POS Profile's "default mode" is deliberately ignored: the
+	 *  outstanding balance belongs in the Paytm machine box, not a default-mode
+	 *  row. Only a return (or an explicitly requested mode, e.g. a quick
+	 *  tender button) books a payment row. */
 	function tenderExact(mode?: string) {
 		console.log("tenderExact")
-		const target =
-			rows.value.find((row) => row.mode_of_payment === mode) ??
-			rows.value.find((row) => row.default) ??
-			rows.value[0];
-		if (!target) return;
+		if (cart.isReturn || mode) {
+			const target =
+				rows.value.find((row) => row.mode_of_payment === mode) ??
+				rows.value.find((row) => row.default) ??
+				rows.value[0];
+			if (!target) return;
+			clear();
+			// Signed, not clamped: a return has to be able to tender a negative amount
+			// or the refund can never be completed. Paytm machine tenders are already
+			// taken, so only the remainder goes onto the chosen mode.
+			target.amount = money(payable.value - paytmTotal.value);
+			return;
+		}
 		clear();
-		// Signed, not clamped: a return has to be able to tender a negative amount
-		// or the refund can never be completed.
-		target.amount = money(payable.value);
+		syncPaytmBox();
 	}
 
 	function clear() {
 		for (const row of rows.value) row.amount = 0;
+	}
+
+	/** True while the cashier is editing the box by hand, so the refill stands down. */
+	function setPaytmEditing(editing: boolean) {
+		paytmEditing.value = editing;
+	}
+
+	/** Put whatever the machine still has to collect into the Paytm box, unless
+	 *  the cashier is mid-edit. `paytmDue` already excludes what the other modes,
+	 *  credit and confirmed machine tenders cover, so this stays in step with the
+	 *  ticket automatically. */
+	function syncPaytmBox() {
+		if (paytmEditing.value) return;
+		const due = paytmDue.value;
+		paytmBox.value = due > 0 ? String(due) : "";
+	}
+
+	// Refill the Paytm box whenever the balance moves — a cashier typing another
+	// mode, credit or loyalty being applied, a machine payment landing, or the
+	// totals settling after a draft save all pass through `paytmDue`.
+	watch(paytmDue, () => syncPaytmBox());
+
+	/** A successful Paytm EDC payment is tracked apart from the typed modes so the
+	 *  panel can show the running total read-only, and each payment lands as its
+	 *  own Paytm Machine row on the Sales Invoice. */
+	function applyPaytmPayment(amount: number) {
+		paytmPayments.value = [...paytmPayments.value, money(Math.abs(toNumber(amount)))];
+		// The machine money is already taken, so auto-tender must not rewrite it.
+		touched.value = true;
 	}
 
 	/** Offline-capable, and the thing that failed was the network rather than a rule. */
@@ -335,19 +424,30 @@ export const usePaymentsStore = defineStore("payments", () => {
 		const invoice = {
 			...cart.toInvoicePayload(),
 			name: draftName,
-			payments: rows.value
+			payments: [
 				// Magnitude, not sign: refund rows are negative and a `> 0` test
 				// silently drops every one of them, leaving the invoice unpaid.
 				// Credit-mode lines are also dropped — that value stays outstanding,
 				// it is never booked as a payment.
-				.filter((row) => Math.abs(row.amount) > 0 && !isCreditRow(row))
-				.map((row) => ({
-					mode_of_payment: row.mode_of_payment,
-					amount: row.amount,
-					account: row.account,
-					type: row.type,
-					default: row.default ? 1 : 0,
+				...rows.value
+					.filter(
+						(row) => Math.abs(row.amount) > 0 && !isCreditRow(row) && row.mode_of_payment !== PAYTM_MODE,
+					)
+					.map((row) => ({
+						mode_of_payment: row.mode_of_payment,
+						amount: row.amount,
+						account: row.account,
+						type: row.type,
+						default: row.default ? 1 : 0,
+					})),
+				// One Paytm Machine row per confirmed machine payment, so the
+				// invoice keeps a line for each transaction.
+				...paytmPayments.value.map((amount) => ({
+					mode_of_payment: PAYTM_MODE,
+					amount: money(Math.abs(toNumber(amount))),
+					default: 0,
 				})),
+			],
 			paid_amount: paid.value,
 			change_amount: change.value,
 			// A credit tender turns the invoice into a credit sale that needs approval.
@@ -502,6 +602,11 @@ export const usePaymentsStore = defineStore("payments", () => {
 		submitting,
 		touched,
 		lastInvoice,
+		paytmPayments,
+		paytmTotal,
+		paytmDue,
+		paytmBox,
+		paytmEditing,
 		sign,
 		paid,
 		creditTendered,
@@ -531,6 +636,9 @@ export const usePaymentsStore = defineStore("payments", () => {
 		tenderExact,
 		balanceTender,
 		clear,
+		applyPaytmPayment,
+		setPaytmEditing,
+		syncPaytmBox,
 		submit,
 	};
 });

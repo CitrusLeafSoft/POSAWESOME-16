@@ -38,7 +38,6 @@ export const useCartStore = defineStore("cart", () => {
 	const deliveryDate = ref<string | null>(null);
 	const poNumber = ref<string>("");
 	const warrantyNumber = ref<string>("");
-	const vehicleDetailsEnabled = ref(false);
 	const vehicleDetails = ref<VehicleDetail[]>([]);
 	const notes = ref<string>("");
 	const shippingAddress = ref<string | null>(null);
@@ -617,7 +616,6 @@ export const useCartStore = defineStore("cart", () => {
 
 	/* ---------------------------------------------------------- persistence */
 	function toVehicleDetails(): Record<string, unknown>[] {
-		if (!vehicleDetailsEnabled.value) return [];
 		return vehicleDetails.value
 			.map((row) => ({
 				vehicle_type: row.vehicle_type || undefined,
@@ -777,7 +775,6 @@ export const useCartStore = defineStore("cart", () => {
 		notes.value = "";
 		poNumber.value = "";
 		warrantyNumber.value = "";
-		vehicleDetailsEnabled.value = false;
 		vehicleDetails.value = [];
 		dueDate.value = null;
 		deliveryDate.value = null;
@@ -811,7 +808,6 @@ export const useCartStore = defineStore("cart", () => {
 		poNumber.value = (doc.po_no as string) ?? "";
 		warrantyNumber.value = (doc.custom_warranty_number as string) ?? "";
 		const vehicleRows = (doc.custom_vehicle_details as Record<string, unknown>[]) ?? [];
-		vehicleDetailsEnabled.value = vehicleRows.length > 0;
 		vehicleDetails.value = vehicleRows.map((row) => ({
 			posa_row_id: uid("veh"),
 			vehicle_type: (row.vehicle_type as string) ?? "",
@@ -945,7 +941,6 @@ export const useCartStore = defineStore("cart", () => {
 		deliveryDate,
 		poNumber,
 		warrantyNumber,
-		vehicleDetailsEnabled,
 		vehicleDetails,
 		notes,
 		shippingAddress,
