@@ -69,6 +69,8 @@ export const usePaymentsStore = defineStore("payments", () => {
 		return row.mode_of_payment === CREDIT_MODE;
 	}
 
+	const dontCreateLoyaltyPoints = ref(false);
+
 	/** Money actually taken from the customer — credit-mode lines are excluded,
 	 *  and Paytm machine tenders are tracked separately below. */
 	const paytmTotal = computed(() =>
@@ -176,6 +178,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 		paytmPayments.value = [];
 		paytmBox.value = "";
 		paytmEditing.value = false;
+		dontCreateLoyaltyPoints.value = false;
 	}
 
 	/**
@@ -452,6 +455,9 @@ export const usePaymentsStore = defineStore("payments", () => {
 			change_amount: change.value,
 			// A credit tender turns the invoice into a credit sale that needs approval.
 			custom_is_pos_credit: isPosCredit.value ? 1 : 0,
+			dont_create_loyalty_points: dontCreateLoyaltyPoints.value ? 1 : 0,
+			cost_center: session.costcenter,
+			branch: session.branch
 		};
 
 		const applied = money(creditApplied.value + creditNoteApplied.value);
@@ -602,6 +608,7 @@ export const usePaymentsStore = defineStore("payments", () => {
 		submitting,
 		touched,
 		lastInvoice,
+		dontCreateLoyaltyPoints,
 		paytmPayments,
 		paytmTotal,
 		paytmDue,

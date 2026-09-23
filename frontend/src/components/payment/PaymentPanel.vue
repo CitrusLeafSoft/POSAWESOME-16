@@ -177,9 +177,7 @@ async function payByPaytm() {
 			throw new Error((initiated.message as string) || "Could not reach the Paytm machine.");
 		}
 		const refId = initiated.merchant_transaction_id as string;
-		const txnDatetime = initiated.transaction_datetime as string;
 
-		// Poll the machine until it confirms, declines, or we give up (~120s).
 		const deadline = Date.now() + 120_000;
 		paytmRemaining.value = Math.ceil((deadline - Date.now()) / 1000);
 		if (paytmTimer !== undefined) window.clearInterval(paytmTimer);
@@ -191,25 +189,50 @@ async function payByPaytm() {
 				paytmTimer = undefined;
 			}
 		}, 1000);
+
 		for (; ;) {
-			await new Promise((resolve) => setTimeout(resolve, 3000));
-			const status = (await api.checkPaytmPaymentStatus(refId, txnDatetime, invoiceName, amount)) as Record<
-				string,
-				unknown
-			>;
-			if (status.verified) {
+			await new Promise((resolve) => setTimeout(resolve, 10000));
+
+			const result = (await api.checkPaytmPaymentStatus(refId, invoiceName)) as Record<string, any>;
+
+			const response = typeof result.response === "string"
+								? JSON.parse(result.response)
+								: result.response;
+			const status = response?.status as string | undefined;
+			const verified = response?.verified as boolean | undefined;
+
+			if (status == "VERIFIED" && verified) {
 				payments.applyPaytmPayment(amount);
 				paytmStatus.value = "";
 				payments.syncPaytmBox();
-				ui.success("Paytm payment received", `${formatCurrency(amount)} added to this sale`);
+
+				ui.success(
+					"Paytm payment received",
+					`${formatCurrency(amount)} added to this sale`,
+				);
+
 				return;
 			}
-			if (status.status === "FAILED" || status.status === "CHECKSUM_FAILED" || status.status === "HTTP_ERROR") {
-				throw new Error((status.message as string) || "Paytm machine declined the payment.");
+
+			if (!verified && status == "FAILED") {
+				throw new Error(
+					(response?.message as string) || "Paytm machine declined the payment.",
+				);
 			}
+
+			if (!verified && (status === "TIMEOUT" || status === "PENDING")) {
+				paytmStatus.value =
+					"Payment is still pending. Please check the payment status before retrying.";
+
+				return;
+			}
+
 			paytmStatus.value = "Waiting for the customer to pay…";
+
 			if (Date.now() > deadline) {
-				throw new Error("Timed out waiting for the Paytm machine.");
+				throw new Error(
+					"Timed out waiting for the Paytm machine. Please check the payment status before retrying.",
+				);
 			}
 		}
 	} catch (error) {
@@ -302,6 +325,16 @@ async function payByPaytm() {
 							{{ formatCurrency(cart.maxLoyaltyAmount) }}
 						</span>
 					</label>
+
+					<label class="flex cursor-pointer items-center gap-1.5" for="do-not-create-loyalty-points">
+						<input id="do-not-create-loyalty-points" type="checkbox"
+							class="size-3.5 shrink-0 rounded border-line accent-violet"
+							:checked="payments.dontCreateLoyaltyPoints"
+							@change="payments.dontCreateLoyaltyPoints = ($event.target as HTMLInputElement).checked" />
+						<span class="px-1 py-1 text-[11px] font-semibold text-violet">
+							Don't Create Loyalty Points
+						</span>
+					</label>
 					<span>
 						<button @click="openLoyaltyDetails"
 							class="px-1.5 py-1 text-[11px] font-semibold text-violet hover:underline">
@@ -316,48 +349,34 @@ async function payByPaytm() {
 				<!-- Modes -->
 				<div class="space-y-2">
 					<template v-for="row in manualRows" :key="row.mode_of_payment">
-						<div
-							v-if="!isReturn || row.mode_of_payment !== CREDIT_MODE"
-							class="flex items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-xs transition focus-within:border-accent"
-						>
+						<div v-if="!isReturn || row.mode_of_payment !== CREDIT_MODE"
+							class="flex items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-xs transition focus-within:border-accent">
 							<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted">
 								<Banknote class="size-4" />
 							</span>
 
-							<label
-								class="min-w-0 flex-1 truncate text-sm font-medium"
-								:for="`pay-${row.mode_of_payment}`"
-							>
+							<label class="min-w-0 flex-1 truncate text-sm font-medium"
+								:for="`pay-${row.mode_of_payment}`">
 								{{ row.mode_of_payment }}
 
-								<span
-									v-if="row.mode_of_payment === CREDIT_MODE"
-									class="ms-1 rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
-								>
+								<span v-if="row.mode_of_payment === CREDIT_MODE"
+									class="ms-1 rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">
 									Credit
 								</span>
 							</label>
 
-							<input
-								:id="`pay-${row.mode_of_payment}`"
-								:value="row.amount ? Math.abs(row.amount) : ''"
-								type="text"
-								inputmode="decimal"
-								placeholder="0.00"
+							<input :id="`pay-${row.mode_of_payment}`" :value="row.amount ? Math.abs(row.amount) : ''"
+								type="text" inputmode="decimal" placeholder="0.00"
 								class="h-10 w-32 rounded-card border-line bg-surface-2 text-right text-base font-semibold tnum focus:border-accent focus:ring-0"
-								@focus="($event.target as HTMLInputElement).select()"
-								@input="payments.setAmount(
+								@focus="($event.target as HTMLInputElement).select()" @input="payments.setAmount(
 									row.mode_of_payment,
 									toNumber(($event.target as HTMLInputElement).value)
-								)"
-							/>
+								)" />
 						</div>
 					</template>
 
-					<div
-						v-if="payments.paytmTotal > 0"
-						class="flex items-center gap-2 rounded-card border border-dashed border-accent/50 bg-accent-soft/30 p-2"
-					>
+					<div v-if="payments.paytmTotal > 0"
+						class="flex items-center gap-2 rounded-card border border-dashed border-accent/50 bg-accent-soft/30 p-2">
 						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
 							<Smartphone class="size-4" />
 						</span>
@@ -365,8 +384,7 @@ async function payByPaytm() {
 						<label class="min-w-0 flex-1 truncate text-sm font-medium">
 							Paytm Machine
 							<span
-								class="ms-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent"
-							>
+								class="ms-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
 								Paid
 							</span>
 						</label>
@@ -386,10 +404,10 @@ async function payByPaytm() {
 						<span class="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
 							<Smartphone class="size-4" />
 						</span>
-<input v-model="payments.paytmBox" type="text" inputmode="decimal" placeholder="0.00"
-						class="h-10 w-32 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-accent focus:ring-0"
-						@focus="($event.target as HTMLInputElement).select(); onPaytmFocus()" @blur="onPaytmBlur()"
-						@keydown.enter.prevent="payByPaytm" />
+						<input v-model="payments.paytmBox" type="text" inputmode="decimal" placeholder="0.00"
+							class="h-10 w-32 rounded-card border-line bg-surface text-right text-sm font-semibold tnum focus:border-accent focus:ring-0"
+							@focus="($event.target as HTMLInputElement).select(); onPaytmFocus()" @blur="onPaytmBlur()"
+							@keydown.enter.prevent="payByPaytm" />
 						<button type="button"
 							class="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-card bg-accent px-3 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
 							:disabled="paytmProcessing" @click="payByPaytm">
@@ -444,7 +462,7 @@ async function payByPaytm() {
 					</div>
 				</div>
 
-				
+
 
 				<!-- Credit notes — returned invoices the customer can spend. Separate
 				     from the advance credit above: checking a note applies its whole
@@ -546,7 +564,7 @@ async function payByPaytm() {
 				<div v-if="payments.creditNoteApplied > 0 && !isReturn" class="flex justify-between text-sm">
 					<span class="text-success">By credit note</span>
 					<span class="font-semibold tnum text-success">−{{ formatCurrency(payments.creditNoteApplied)
-						}}</span>
+					}}</span>
 				</div>
 				<div class="flex justify-between text-sm">
 					<span :class="payments.outstanding > 0 ? 'text-danger' : 'text-muted'">

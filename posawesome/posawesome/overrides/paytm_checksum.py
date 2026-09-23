@@ -12,15 +12,19 @@ BLOCK_SIZE = 16
 
 
 def generate_checksum(param_dict, merchant_key, salt=None):
+	print("2. Data:", merchant_key,param_dict)
 	params_string = __get_param_string__(param_dict)
+	print(params_string,"params_string")
 	salt = salt if salt else __id_generator__(4)
+	print(salt,"salt")
 	final_string = '%s|%s' % (params_string, salt)
-
+	print(final_string,"final_string")
 	hasher = hashlib.sha256(final_string.encode())
+	print(hasher)
 	hash_string = hasher.hexdigest()
-
+	print(hash_string)
 	hash_string += salt
-
+	print(hash_string)
 	return __encode__(hash_string, IV, merchant_key)
 
 
@@ -85,9 +89,9 @@ def __id_generator__(size=6, chars=string.ascii_uppercase + string.digits + stri
 def __get_param_string__(params):
 	params_string = []
 	for key in sorted(params.keys()):
-		if "REFUND" in params[key] or "|" in params[key]:
-			respons_dict = {}
-			exit()
+		# if "REFUND" in params[key] or "|" in params[key]:
+		# 	respons_dict = {}
+		# 	exit()
 		value = params[key]
 		params_string.append('' if value == 'null' else str(value))
 	return '|'.join(params_string)
@@ -101,10 +105,14 @@ def __encode__(to_encode, iv, key):
 	# Pad
 	to_encode = __pad__(to_encode)
 	# Encrypt
+	print(to_encode)
 	c = AES.new(key.encode('utf-8'), AES.MODE_CBC, iv.encode('utf-8'))
+	print(c,"c")
 	to_encode = c.encrypt(to_encode.encode('utf-8'))
 	# Encode
+	print(to_encode,"to_encode")
 	to_encode = base64.b64encode(to_encode)
+	print(to_encode)
 	return to_encode.decode("UTF-8")
 
 
@@ -124,12 +132,13 @@ def __decode__(to_decode, iv, key):
 if __name__ == "__main__":
 	
 	params = {
-		"paytmMid":"XXXXXX",
-		"paytmTid": "70002488",
-		"transactionDateTime": "2026-09-10 10:45:49",
-		"merchantTransactionId": "1234abc3245",
-		"merchantReferenceNo": "234564323456",
-		"transactionAmount": "9000"
-	}
+		"mid": "fOCDPB57648908808819",
+		"orderId": "POSAOS2026091513025755313",
+		"txnId": "20260915011650000306605318566811656",
+		"refId": "REFUNDID_98765",
+		"refundAmount": "1000"
+	  }
  
-	print(generate_checksum(params, "XXXXXXX"))
+	
+	print(generate_checksum(params, "AnuWFy9OJLiHUxs&"))
+
