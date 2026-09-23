@@ -318,12 +318,10 @@ export const api = {
 		),
 	checkPaytmPaymentStatus: (
 		merchant_transaction_id: string,
-		transaction_datetime: string,
 		sales_invoice?: string,
-		amount?: number,
 	) =>
 		call<Record<string, unknown>>(
-			`posawesome.posawesome.overrides.paytm_payment_integration.check_paytm_payment_status`,
-			{ merchant_transaction_id, transaction_datetime, sales_invoice, amount },
+			`posawesome.posawesome.overrides.paytm_payment_integration.get_paytm_payment_status`,
+			{ sales_invoice, merchant_transaction_id },
 		),
 };

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { CloudOff, Keyboard, LogOut, ShoppingBag, Store } from "lucide-vue-next";
+import { CloudOff, Keyboard, LogOut, ShoppingBag, Store,BadgeCent,Split } from "lucide-vue-next";
 import { useSessionStore } from "@/stores/session";
 import { useUiStore } from "@/stores/ui";
 import { useCartStore } from "@/stores/cart";
@@ -42,6 +42,14 @@ const initials = computed(() =>
 		<div class="hidden min-w-0 items-center gap-1.5 text-xs text-muted md:flex">
 			<Store class="size-3.5 shrink-0" />
 			<span class="truncate">{{ session.warehouse || "—" }}</span>
+		</div>
+		<div class="hidden min-w-0 items-center gap-1.5 text-xs text-muted md:flex">
+			<BadgeCent class="size-3.5 shrink-0" />
+			<span class="truncate">{{ session.costcenter || "—" }}</span>
+		</div>
+		<div class="hidden min-w-0 items-center gap-1.5 text-xs text-muted md:flex">
+			<Split class="size-3.5 shrink-0" />
+			<span class="truncate">{{ session.branch || "—" }}</span>
 		</div>
 
 		<div class="ml-auto flex items-center gap-1.5 sm:gap-2">

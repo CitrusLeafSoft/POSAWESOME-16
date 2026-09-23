@@ -46,6 +46,8 @@ export const useSessionStore = defineStore("session", () => {
 
 	const currency = computed(() => profile.value?.currency ?? "USD");
 	const warehouse = computed(() => profile.value?.warehouse ?? "");
+	const costcenter = computed(() => profile.value?.cost_center ?? "");
+	const branch = computed(() => profile.value?.branch ?? "");
 	const priceList = computed(() => profile.value?.selling_price_list ?? "");
 	const companyName = computed(() => profile.value?.company ?? "");
 	const shiftName = computed(() => shift.value?.name ?? "");
@@ -172,6 +174,8 @@ export const useSessionStore = defineStore("session", () => {
 		serverReachable,
 		currency,
 		warehouse,
+		costcenter,
+		branch,
 		priceList,
 		companyName,
 		shiftName,
