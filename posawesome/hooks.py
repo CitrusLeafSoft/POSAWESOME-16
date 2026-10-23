@@ -72,28 +72,28 @@ scheduler_events = {
 fixtures = [
 	{
 		"doctype": "Custom Field",
-		"filters": [["name", "like", "%-posa_%"],["module", "in", ["POSAwesome"]]],
+		"filters": [["module", "in", ["POSAwesome"]]],
 	},
-	{
-		"doctype": "Custom Field",
-		"filters": [
-			[
-				"name",
-				"in",
-				(
-					"POS Profile-use_customer_credit",
-					"POS Profile-use_cashback",
-					"POS Profile-hide_expected_amount",
-					"POS Profile-custom_allow_select_sales_order",
-					"POS Profile-column_break_dqsba",
-					"POS Profile-column_break_anyol",
-					"POS Profile-column_break_uolvm",
-					"POS Profile-pose_use_limit_search",
-					"POS Profile-pos_awesome_payments",
-				),
-			]
-		],
-	},
+	# {
+	# 	"doctype": "Custom Field",
+	# 	"filters": [
+	# 		[
+	# 			"name",
+	# 			"in",
+	# 			(
+	# 				"POS Profile-use_customer_credit",
+	# 				"POS Profile-use_cashback",
+	# 				"POS Profile-hide_expected_amount",
+	# 				"POS Profile-custom_allow_select_sales_order",
+	# 				"POS Profile-column_break_dqsba",
+	# 				"POS Profile-column_break_anyol",
+	# 				"POS Profile-column_break_uolvm",
+	# 				"POS Profile-pose_use_limit_search",
+	# 				"POS Profile-pos_awesome_payments",
+	# 			),
+	# 		]
+	# 	],
+	# },
 	{
 		"doctype": "Property Setter",
 		"filters": [["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy",)]],
