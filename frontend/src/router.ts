@@ -25,6 +25,7 @@ router.beforeEach((to) => {
 	const session = useSessionStore();
 	const shiftOpen = session.ready;
 
-	if ((to.name === "sell" || to.name === "close") && !shiftOpen) return { name: "shift" };
+	if ((to.name === "sell" || to.name === "close") && !shiftOpen)
+		return { name: "shift", query: to.query };
 	if (to.name === "shift" && shiftOpen) return { name: "sell" };
 });

@@ -15,6 +15,7 @@ doctype_js = {
 	"POS Profile": "posawesome/api/pos_profile.js",
 	"Sales Invoice": "posawesome/api/invoice.js",
 	"Company": "posawesome/api/company.js",
+	"Quotation" : "public/js/quotation.js"
 }
 
 override_doctype_class = {
@@ -48,6 +49,8 @@ doc_events = {
 		"validate": "posawesome.posawesome.api.invoice.validate",
 		"before_submit": "posawesome.posawesome.api.invoice.before_submit",
 		"before_cancel": "posawesome.posawesome.api.invoice.before_cancel",
+		"on_update" : "posawesome.posawesome.overrides.sales_invoice.update_quotation_status",
+		"on_cancel" : "posawesome.posawesome.overrides.sales_invoice.update_quotation_status_on_cancel"
 	},
 	"Customer": {
 		"validate": "posawesome.posawesome.api.customer.validate",
@@ -96,6 +99,6 @@ fixtures = [
 	# },
 	{
 		"doctype": "Property Setter",
-		"filters": [["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy",)]],
+		"or_filters": [["module", "in", ["POSAwesome"]], ["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy",)]],
 	},
 ]

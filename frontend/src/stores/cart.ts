@@ -12,7 +12,8 @@ import { api } from "@/lib/api";
 import { applyLineDiscount, calculateTotals, lineAmount, type TaxRow } from "@/lib/totals";
 import { money, qty as roundQty, today, toNumber } from "@/lib/format";
 import { uid } from "@/lib/uid";
-import type { AppliedOffer, BatchInfo, CartItem, Coupon, CustomerInfo, Item, SerialInfo, VehicleDetail } from "@/types";
+import type { AppliedOffer, BatchInfo, CartItem, Coupon, CustomerInfo, Item, QuotationDetail, SerialInfo, VehicleDetail } from "@/types";
+import { useCatalogStore } from "./catalog";
 import { useSessionStore } from "./session";
 import { useUiStore } from "./ui";
 
@@ -28,6 +29,8 @@ export const useCartStore = defineStore("cart", () => {
 
 	/* ---------------------------------------------------------------- state */
 	const invoiceName = ref<string | null>(null);
+	/** Quotation this sale was started from, mirrored onto Sales Invoice.custom_pos_quotation. */
+	const posQuotation = ref<string>("");
 	const items = ref<CartItem[]>([]);
 	const taxes = ref<TaxRow[]>([]);
 	const customer = ref<string>("");
@@ -265,7 +268,10 @@ export const useCartStore = defineStore("cart", () => {
 		return pool.filter((s) => !taken.has(s.serial_no));
 	}
 
-	async function addItem(item: Item, options: { qty?: number; uom?: string; batchNo?: string } = {}) {
+	async function addItem(
+		item: Item,
+		options: { qty?: number; uom?: string; batchNo?: string; rate?: number } = {},
+	) {
 		if (isReturn.value) {
 			ui.warn("Return in progress", "Finish or cancel the return before adding new items.");
 			return;
@@ -294,6 +300,11 @@ export const useCartStore = defineStore("cart", () => {
 			uom,
 			conversion_factor: conversionFactor,
 			batch_no: options.batchNo ?? null,
+			// A hand-off from a quotation may carry a negotiated rate; keep the price
+			// list rate intact so the difference still reads as a discount.
+			...(options.rate !== undefined && Number.isFinite(options.rate)
+				? { rate: money(options.rate) }
+				: {}),
 		});
 
 		// A batch-priced item overrides the price list.
@@ -316,6 +327,66 @@ export const useCartStore = defineStore("cart", () => {
 
 		void hydrateLine(line);
 		return line;
+	}
+
+	/** Add a line by item code, resolving the catalogue row for it. Used by the
+	 *  quotation hand-off, where the code arrives without the rest of the item. */
+	async function addItemByCode(
+		itemCode: string,
+		options: { qty?: number; uom?: string; batchNo?: string; rate?: number } = {},
+	): Promise<CartItem | null> {
+		const catalog = useCatalogStore();
+		const item = await catalog.resolveItemByCode(itemCode, customer.value);
+		if (!item) return null;
+		return (await addItem(item, options)) ?? null;
+	}
+
+	/**
+	 * Fill the cart from a quotation.
+	 *
+	 * Only the quotation name comes from the caller; customer and lines are read
+	 * from the server so the terminal can never be told to sell something the
+	 * quotation does not contain. `replace` clears whatever was in the cart first,
+	 * which is what both the URL hand-off and the search box want.
+	 */
+	async function applyQuotation(
+		quotation: string,
+		options: { replace?: boolean } = {},
+	): Promise<{ name: string; added: number; missing: string[] }> {
+		const doc = (await api.quotationDetails(quotation)) as QuotationDetail;
+
+		if (options.replace) reset();
+
+		posQuotation.value = doc.name || quotation;
+
+		if (doc.customer) {
+			customer.value = doc.customer;
+			try {
+				customerInfo.value = (await api.customerInfo(doc.customer)) as CustomerInfo;
+			} catch {
+				// Offline or stale customer: the name is enough to keep selling.
+				customerInfo.value = null;
+			}
+		}
+
+		// Keep the quotation reference on the invoice without clobbering a note the
+		// cashier already typed.
+		if (!notes.value) notes.value = `Quotation: ${doc.name || quotation}`;
+
+		const missing: string[] = [];
+		let added = 0;
+		for (const row of doc.items ?? []) {
+			if (!row.item_code) continue;
+			const line = await addItemByCode(row.item_code, {
+				qty: toNumber(row.qty) || 1,
+				uom: row.uom || undefined,
+				rate: row.rate !== undefined ? toNumber(row.rate) : undefined,
+			});
+			if (line) added += 1;
+			else missing.push(row.item_code);
+		}
+
+		return { name: doc.name || quotation, added, missing };
 	}
 
 	/** A customer-level discount is applied to every new line when enabled. */
@@ -660,6 +731,7 @@ export const useCartStore = defineStore("cart", () => {
 			taxes_and_charges: profile?.taxes_and_charges,
 			tc_name: profile?.tc_name,
 			po_no: poNumber.value || undefined,
+			custom_pos_quotation: posQuotation.value || undefined,
 			custom_warranty_number: warrantyNumber.value || undefined,
 			custom_vehicle_details: toVehicleDetails(),
 			posa_notes: notes.value || undefined,
@@ -759,6 +831,7 @@ export const useCartStore = defineStore("cart", () => {
 	function reset() {
 		clearBumps();
 		invoiceName.value = null;
+		posQuotation.value = "";
 		items.value = [];
 		taxes.value = [];
 		additionalDiscount.value = 0;
@@ -806,6 +879,7 @@ export const useCartStore = defineStore("cart", () => {
 		customer.value = (doc.customer as string) ?? "";
 		notes.value = (doc.posa_notes as string) ?? "";
 		poNumber.value = (doc.po_no as string) ?? "";
+		posQuotation.value = (doc.custom_pos_quotation as string) ?? "";
 		warrantyNumber.value = (doc.custom_warranty_number as string) ?? "";
 		const vehicleRows = (doc.custom_vehicle_details as Record<string, unknown>[]) ?? [];
 		vehicleDetails.value = vehicleRows.map((row) => ({
@@ -931,6 +1005,7 @@ export const useCartStore = defineStore("cart", () => {
 
 	return {
 		invoiceName,
+		posQuotation,
 		items,
 		taxes,
 		customer,
@@ -972,6 +1047,8 @@ export const useCartStore = defineStore("cart", () => {
 		applyDiscountOn,
 
 		addItem,
+		addItemByCode,
+		applyQuotation,
 		setQty,
 		stepQty,
 		setRate,

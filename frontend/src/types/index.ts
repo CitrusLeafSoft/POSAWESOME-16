@@ -213,6 +213,39 @@ export interface Customer {
 	primary_address?: string | null;
 }
 
+export interface QuotationSearchResult {
+	name: string;
+	customer: string;
+	customer_name?: string;
+	transaction_date?: string;
+	grand_total?: number;
+	currency?: string;
+	status?: string;
+	docstatus?: number;
+}
+
+export interface QuotationDetailItem {
+	item_code: string;
+	item_name?: string;
+	qty: number;
+	uom?: string;
+	rate?: number;
+	conversion_factor?: number;
+	warehouse?: string | null;
+}
+
+export interface QuotationDetail {
+	name: string;
+	customer: string;
+	customer_name?: string;
+	currency?: string;
+	selling_price_list?: string;
+	transaction_date?: string;
+	grand_total?: number;
+	status?: string;
+	items: QuotationDetailItem[];
+}
+
 export interface VehicleDetail {
 	posa_row_id: string;
 	vehicle_type?: string;

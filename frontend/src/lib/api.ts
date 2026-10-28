@@ -7,6 +7,8 @@
  * surfacing live in exactly one place.
  */
 
+import type { QuotationDetail, QuotationSearchResult } from "@/types";
+
 export class FrappeError extends Error {
 	readonly status: number;
 	readonly exception: string;
@@ -254,6 +256,12 @@ export const api = {
 			vehicle_types: vehicle_types || [],
 			vehicle_models: vehicle_models || [],
 		}),
+
+	/* Quotations */
+	searchQuotations: (search_value: string, limit = 10) =>
+		call<QuotationSearchResult[]>(`${NS}.quotation.search_quotations`, { search_value, limit }),
+	quotationDetails: (quotation: string) =>
+		call<QuotationDetail>(`${NS}.quotation.get_quotation_details`, { quotation }),
 
 	/* Invoice */
 	updateInvoice: (data: unknown) => call<unknown>(`${NS}.invoice_api.update_invoice`, { data }),

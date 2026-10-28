@@ -5,7 +5,7 @@
  * toasts, busy veil).
  */
 import { computed, onMounted, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useSessionStore } from "@/stores/session";
 import { useSyncStore } from "@/stores/sync";
 import { useUiStore } from "@/stores/ui";
@@ -20,6 +20,7 @@ const session = useSessionStore();
 const sync = useSyncStore();
 const ui = useUiStore();
 const router = useRouter();
+const route = useRoute();
 
 const showApp = computed(() => session.ready && !session.booting);
 
@@ -34,7 +35,7 @@ onMounted(async () => {
 watch(
 	() => session.needsOpeningShift,
 	(needs) => {
-		if (needs) void router.replace({ name: "shift" });
+		if (needs) void router.replace({ name: "shift", query: route.query });
 	},
 	{ immediate: true },
 );
@@ -42,7 +43,8 @@ watch(
 watch(
 	() => session.ready,
 	(ready) => {
-		if (ready && router.currentRoute.value.name === "shift") void router.replace({ name: "sell" });
+		if (ready && router.currentRoute.value.name === "shift")
+			void router.replace({ name: "sell", query: route.query });
 	},
 );
 </script>
