@@ -11,7 +11,7 @@ function add_create_si_button(frm) {
         frm.doc.party_name &&
 		!["Invoiced", "Lost", "Expired", "Cancelled"].includes(frm.doc.status)
     ) {
-        frm.add_custom_button("Sales Invoice", function () {
+        frm.add_custom_button("POS Sales Invoice", function () {
             open_pos_sale(frm);
         }, "Create");
     }
