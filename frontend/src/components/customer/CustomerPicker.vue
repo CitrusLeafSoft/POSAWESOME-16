@@ -1,18 +1,27 @@
 <script setup lang="ts">
 /** Customer selector. Filters locally against the cached list so it stays usable
- *  offline, and shows the picked customer's key detail inline. */
+ *  offline, shows the picked customer's key detail inline, and doubles as a
+ *  quotation search — picking a quotation fills the whole cart. */
 import { computed, onMounted, ref, watch } from "vue";
-import { ChevronDown, Search, User, X } from "lucide-vue-next";
+import { ChevronDown, FileText, Search, User, X } from "lucide-vue-next";
 import { useCustomerStore } from "@/stores/customers";
 import { useCartStore } from "@/stores/cart";
 import { useSessionStore } from "@/stores/session";
+import { useUiStore } from "@/stores/ui";
+import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
+import type { QuotationSearchResult } from "@/types";
 
 const customers = useCustomerStore();
 const cart = useCartStore();
 const session = useSessionStore();
+const ui = useUiStore();
 
 const open = ref(false);
 const searchEl = ref<HTMLInputElement | null>(null);
+const quotationResults = ref<QuotationSearchResult[]>([]);
+const searchingQuotations = ref(false);
+let quotationTimer: number | undefined;
 
 onMounted(() => {
 	void customers.load();
@@ -25,15 +34,73 @@ const label = computed(() => current.value?.customer_name || cart.customer || "S
 watch(open, async (isOpen) => {
 	if (!isOpen) return;
 	customers.search = "";
+	quotationResults.value = [];
 	// Wait a tick so the input exists before focusing it.
 	await Promise.resolve();
 	searchEl.value?.focus();
 });
 
+/** The same box finds customers and quotations — a quotation is a sale waiting
+ *  to be finished, so searching its number here is the natural shortcut. */
+watch(
+	() => customers.search,
+	(term) => {
+		if (quotationTimer) window.clearTimeout(quotationTimer);
+		const value = term.trim();
+		if (value.length < 2) {
+			quotationResults.value = [];
+			searchingQuotations.value = false;
+			return;
+		}
+		quotationTimer = window.setTimeout(() => void findQuotations(value), 250);
+	},
+);
+
+async function findQuotations(term: string) {
+	searchingQuotations.value = true;
+	try {
+		const rows = (await api.searchQuotations(term, 5)) as QuotationSearchResult[];
+		// A slower response for an older keystroke must not overwrite newer results.
+		if (term !== customers.search.trim()) return;
+		quotationResults.value = rows ?? [];
+	} catch {
+		quotationResults.value = [];
+	} finally {
+		if (term === customers.search.trim()) searchingQuotations.value = false;
+	}
+}
+
 async function choose(name: string) {
 	cart.customer = name;
 	open.value = false;
 	cart.customerInfo = await customers.info(name);
+}
+
+async function chooseQuotation(quotation: QuotationSearchResult) {
+	if (
+		cart.items.length &&
+		!window.confirm(`Replace the current cart with quotation ${quotation.name}?`)
+	) {
+		return;
+	}
+
+	open.value = false;
+	customers.search = "";
+	quotationResults.value = [];
+
+	try {
+		const result = await cart.applyQuotation(quotation.name, { replace: true });
+		if (result.missing.length) {
+			ui.warn(
+				`Quotation ${result.name} loaded with missing items`,
+				`Not in this POS catalog: ${result.missing.join(", ")}`,
+			);
+		} else {
+			ui.success("Quotation loaded", `${result.name} · ${result.added} line(s)`);
+		}
+	} catch (error) {
+		ui.fail("Could not load the quotation", error instanceof Error ? error.message : String(error));
+	}
 }
 </script>
 
@@ -73,7 +140,7 @@ async function choose(name: string) {
 						ref="searchEl"
 						v-model="customers.search"
 						type="search"
-						placeholder="Name, mobile or tax ID…"
+						placeholder="Customer, mobile or quotation…"
 						class="h-10 w-full border-0 bg-transparent pl-9 pr-9 text-sm focus:ring-0"
 					/>
 					<button
@@ -86,9 +153,52 @@ async function choose(name: string) {
 					</button>
 				</div>
 
+				<!-- Quotations first: picking one fills the whole invoice, not just
+				     the customer, so it should be hard to miss. -->
+				<div
+					v-if="searchingQuotations || quotationResults.length"
+					class="border-b border-line py-1"
+				>
+					<p class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-subtle">
+						Quotations
+					</p>
+					<p v-if="searchingQuotations && !quotationResults.length" class="px-3 py-2 text-xs text-muted">
+						Searching…
+					</p>
+					<ul>
+						<li v-for="quotation in quotationResults" :key="quotation.name">
+							<button
+								type="button"
+								class="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-surface-2"
+								@click="chooseQuotation(quotation)"
+							>
+								<span class="grid size-7 shrink-0 place-items-center rounded-full bg-accent-soft text-accent">
+									<FileText class="size-3.5" />
+								</span>
+								<span class="min-w-0 flex-1">
+									<span class="block truncate text-sm">
+										{{ quotation.name }}
+										<span v-if="quotation.status" class="text-[11px] font-normal text-subtle">
+											· {{ quotation.status }}
+										</span>
+									</span>
+									<span class="block truncate text-[11px] text-subtle">
+										{{ [quotation.customer_name || quotation.customer, formatDate(quotation.transaction_date)]
+											.filter(Boolean)
+											.join(" · ") }}
+									</span>
+								</span>
+							</button>
+						</li>
+					</ul>
+				</div>
+
 				<ul class="max-h-72 overflow-y-auto py-1">
-					<li v-if="!customers.filtered.length" class="px-3 py-6 text-center text-xs text-muted">
-						No customer matches.
+					<li
+						v-if="!customers.filtered.length && !quotationResults.length && !searchingQuotations"
+						class="px-3 py-6 text-center text-xs text-muted"
+					>
+						No customer or quotation matches.
 					</li>
 					<li v-for="entry in customers.filtered" :key="entry.name">
 						<button

@@ -223,11 +223,11 @@ def save_customer(pos_profile, customer_name, company, customer_id=None, **kwarg
 
 
 def _default_customer_group():
-	return frappe.db.get_single_value("Selling Settings", "customer_group") or "All Customer Groups"
+	return frappe.db.get_single_value("Selling Settings", "customer_group") or "Individual"
 
 
 def _default_territory():
-	return frappe.db.get_single_value("Selling Settings", "territory") or "All Territories"
+	return frappe.db.get_single_value("Selling Settings", "territory") or "India"
 
 
 @frappe.whitelist()

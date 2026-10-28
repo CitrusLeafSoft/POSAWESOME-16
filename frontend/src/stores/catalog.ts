@@ -179,6 +179,25 @@ export const useCatalogStore = defineStore("catalog", () => {
 		return items.value.find((item) => item.item_code === itemCode);
 	}
 
+	/** Resolve an item code that came from outside the catalog (a quotation, for
+	 *  instance) — local first, then the server when a fresh tab has no cache yet. */
+	async function resolveItemByCode(itemCode: string, customer?: string): Promise<Item | null> {
+		const local = findByCode(itemCode);
+		if (local) return local;
+		if (!session.profile || !session.serverReachable) return null;
+		try {
+			const rows = (await api.items({
+				pos_profile: session.profile,
+				price_list: session.priceList,
+				search_value: itemCode,
+				customer: customer || undefined,
+			})) as Item[];
+			return rows?.find((row) => row.item_code === itemCode) ?? rows?.[0] ?? null;
+		} catch {
+			return null;
+		}
+	}
+
 	/** Resolve a scanned code, preferring the local catalog before asking the server. */
 	async function resolveScan(lookup: string): Promise<Item | null> {
 		const local = items.value.find(
@@ -217,6 +236,7 @@ export const useCatalogStore = defineStore("catalog", () => {
 		setGroup,
 		clearFilters,
 		findByCode,
+		resolveItemByCode,
 		resolveScan,
 	};
 });

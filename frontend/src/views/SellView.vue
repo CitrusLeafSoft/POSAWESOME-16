@@ -9,8 +9,10 @@
  * rather than the cart.
  */
 import { onMounted, onUnmounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useCartStore } from "@/stores/cart";
 import { useCatalogStore } from "@/stores/catalog";
+import { useCustomerStore } from "@/stores/customers";
 import { useOffersStore } from "@/stores/offers";
 import { usePaymentsStore } from "@/stores/payments";
 import { useSessionStore } from "@/stores/session";
@@ -24,16 +26,102 @@ import CouponsPanel from "@/components/payment/CouponsPanel.vue";
 
 const cart = useCartStore();
 const catalog = useCatalogStore();
+const customers = useCustomerStore();
 const offers = useOffersStore();
 const payments = usePaymentsStore();
 const session = useSessionStore();
 const ui = useUiStore();
+const route = useRoute();
+const router = useRouter();
 
 onMounted(async () => {
 	if (!cart.customer && session.profile?.customer) cart.customer = session.profile.customer;
 	payments.build();
 	await offers.load();
+	await applyPrefill();
 });
+
+interface PrefillItem {
+	item_code?: string;
+	qty?: number | string;
+	uom?: string;
+	rate?: number | string;
+	batch_no?: string;
+}
+
+async function applyPrefill() {
+	const quotation = typeof route.query.quotation === "string" ? route.query.quotation : "";
+	const customer = typeof route.query.customer === "string" ? route.query.customer : "";
+	const parsed = parsePrefillItems(route.query.items);
+	if (!quotation && !customer && !parsed.length) return;
+
+	// Consume the params first — a second pass over the same query would duplicate
+	// every line if anything below throws or the view remounts.
+	await router.replace({ query: {} });
+
+	if (quotation) {
+		// Preferred hand-off: only the quotation name travels in the URL. The
+		// customer and lines are read from the server, so the client cannot invent
+		// a sale the quotation does not describe.
+		try {
+			const result = await cart.applyQuotation(quotation, { replace: true });
+			if (result.missing.length) {
+				ui.warn(
+					"Some quotation items are not available here",
+					`Not found in this POS catalog: ${result.missing.join(", ")}`,
+				);
+			}
+		} catch (error) {
+			ui.fail("Could not load the quotation", error instanceof Error ? error.message : String(error));
+		}
+		return;
+	}
+
+	// Backwards-compatible hand-off: customer and/or item codes passed directly.
+	if (customer) {
+		cart.customer = customer;
+		cart.customerInfo = await customers.info(customer);
+	}
+
+	const missing: string[] = [];
+	for (const entry of parsed) {
+		const code = entry.item_code?.trim();
+		if (!code) continue;
+		const line = await cart.addItemByCode(code, {
+			qty: entry.qty !== undefined ? Number(entry.qty) : undefined,
+			uom: entry.uom || undefined,
+			rate: entry.rate !== undefined && entry.rate !== "" ? Number(entry.rate) : undefined,
+			batchNo: entry.batch_no || undefined,
+		});
+		if (!line) missing.push(code);
+	}
+
+	if (missing.length) {
+		ui.warn(
+			"Some quotation items are not available here",
+			`Not found in this POS catalog: ${missing.join(", ")}`,
+		);
+	}
+}
+
+function parsePrefillItems(raw: unknown): PrefillItem[] {
+	const value = Array.isArray(raw) ? raw[0] : raw;
+	if (typeof value !== "string" || !value.trim()) return [];
+	try {
+		const parsed = JSON.parse(value);
+		if (Array.isArray(parsed)) return parsed as PrefillItem[];
+		if (parsed && typeof parsed === "object") return [parsed as PrefillItem];
+	} catch {
+		// Bare comma-separated item codes are accepted too: ?items=ITEM-1,ITEM-2
+		return value
+			.split(",")
+			.map((code) => code.trim())
+			.filter(Boolean)
+			.map((item_code) => ({ item_code }));
+	}
+	return [];
+}
+
 
 // Offers depend on the cart, so re-evaluate whenever it settles.
 //

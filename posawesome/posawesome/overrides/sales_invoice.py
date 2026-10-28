@@ -12,7 +12,7 @@ inject the invoice's party onto those GL entry lines after ERPNext builds them.
 """
 
 import frappe
-
+from frappe.utils import flt
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 
 
@@ -36,3 +36,53 @@ class PosaSalesInvoice(SalesInvoice):
 				if self.supplier:
 					gle["party_type"] = "Supplier"
 					gle["party"] = self.supplier
+
+def update_quotation_status(doc, method=None):
+	if doc.docstatus != 1:
+		return
+	_recalculate_quotation_status(doc)
+
+
+def update_quotation_status_on_cancel(doc, method=None):
+	"""A cancelled invoice releases its quantity again, so the quotation can go
+	back to Partially Invoiced (or Open) instead of staying stuck on Invoiced."""
+	_recalculate_quotation_status(doc)
+
+
+def _recalculate_quotation_status(doc):
+	quotation_id = doc.get("custom_pos_quotation")
+
+	if not quotation_id:
+		return
+
+	if not frappe.db.exists("Quotation", quotation_id):
+		return
+
+	from posawesome.posawesome.api.quotation import (
+		get_invoiced_stock_qty,
+		item_stock_qty,
+	)
+
+	quotation = frappe.get_doc("Quotation", quotation_id)
+	invoiced = get_invoiced_stock_qty(quotation_id)
+
+	# Compare cumulative submitted quantities, not just this invoice, so a
+	# quotation split over several invoices reaches "Invoiced" only once every
+	# line has been covered.
+	quotation_stock = {}
+	for row in quotation.items:
+		quotation_stock[row.item_code] = quotation_stock.get(row.item_code, 0) + item_stock_qty(row)
+
+	has_remaining = any(
+		flt(invoiced.get(item_code)) < flt(qty) - 0.000001
+		for item_code, qty in quotation_stock.items()
+	)
+
+	frappe.db.set_value(
+		"Quotation",
+		quotation_id,
+		{
+			"status": "Partially Invoiced" if has_remaining else "Invoiced",
+			"order_type": "Sales",
+		},
+	)

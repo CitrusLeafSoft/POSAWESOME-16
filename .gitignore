@@ -11,4 +11,5 @@ frontend/tsconfig.tsbuildinfo
 node_modules
 posawesome/docs/current
 posawesome/public/dist
+posawesome/public/posawesome
 tags
