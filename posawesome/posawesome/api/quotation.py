@@ -106,6 +106,7 @@ def get_quotation_details(quotation):
 		"grand_total": flt(doc.grand_total),
 		"status": doc.status,
 		"items": items,
+		"custom_vehicle_details": doc.custom_vehicle_details,
 	}
 
 

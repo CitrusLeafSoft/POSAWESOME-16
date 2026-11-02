@@ -223,6 +223,14 @@ export interface QuotationSearchResult {
 	status?: string;
 	docstatus?: number;
 }
+export interface QuotationVehicleRow {
+	name?: string;
+	vehicle_type?: string | null;
+	vehicle_model?: string | null;
+	vehicle_mileage?: string | number | null;
+	vehicle_number?: string | null;
+	vehicle_category?: string | null;
+}
 
 export interface QuotationDetailItem {
 	item_code: string;
@@ -244,6 +252,7 @@ export interface QuotationDetail {
 	grand_total?: number;
 	status?: string;
 	items: QuotationDetailItem[];
+	custom_vehicle_details?: QuotationVehicleRow[];
 }
 
 export interface VehicleDetail {
