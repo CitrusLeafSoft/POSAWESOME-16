@@ -358,6 +358,14 @@ export const useCartStore = defineStore("cart", () => {
 		if (options.replace) reset();
 
 		posQuotation.value = doc.name || quotation;
+		vehicleDetails.value = (doc.custom_vehicle_details ?? []).map((row) => ({
+			posa_row_id: uid("veh"),
+			vehicle_number: row.vehicle_number ?? "",
+			vehicle_mileage: row.vehicle_mileage != null ? String(row.vehicle_mileage) : "",
+			vehicle_category: row.vehicle_category ?? "",
+			vehicle_type: row.vehicle_type ?? "",
+			vehicle_model: row.vehicle_model ?? "",
+		}));
 
 		if (doc.customer) {
 			customer.value = doc.customer;
