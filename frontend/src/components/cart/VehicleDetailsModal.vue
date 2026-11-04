@@ -124,6 +124,7 @@ function sanitizeMileage(event: Event) {
 										<option value="">—</option>
 										<option value="Private">Private</option>
 										<option value="Commercial">Commercial</option>
+										<option value="Garage">Garage</option>
 									</select>
 								</td>
 								<td class="px-1 py-0.5">
