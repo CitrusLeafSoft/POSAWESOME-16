@@ -2,3 +2,4 @@
 
 [post_model_sync]
 posawesome.patches.v16_0.fix_pos_coupon_one_use_fieldname
+posawesome.patches.required_fields
