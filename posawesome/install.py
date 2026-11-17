@@ -74,6 +74,7 @@ V16_CUSTOM_FIELDS = {
 			"fieldtype": "Select",
 			"insert_after": "warehouse",
 			"options": "",
+			"reqd": 1
 		},
 		{
 			"fieldname": "posa_allow_loyalty_redemption",
